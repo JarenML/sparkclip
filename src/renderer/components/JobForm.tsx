@@ -1,4 +1,4 @@
-import { normalizeVideoSource, twitchSourceError } from '../../shared/video-source'
+import { normalizeVideoSource, vodSourceError } from '../../shared/video-source'
 import { useEffect, useMemo, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, Clock3, ListVideo, Minus, Plus, Sparkles } from 'lucide-react'
 import { cn, MOD_KEY, parseTimecode, sourceLabel } from '../lib/utils'
@@ -36,7 +36,7 @@ const LAYOUT_STYLES = [
 const MAX_CLIPS = 100
 
 export const WIZARD_STEPS: { id: WizardStep; label: string; title: string; description: string }[] = [
-  { id: 'video', label: 'Video', title: 'Choose a video', description: 'A local file, YouTube link or Twitch VOD link. Optionally clip only part of it.' },
+  { id: 'video', label: 'Video', title: 'Choose a video', description: 'A local file, YouTube link, or Twitch or Kick VOD link. Optionally clip only part of it.' },
   { id: 'format', label: 'Format', title: 'Format, framing and speed', description: 'Choose the look and pace of every clip in this job.' },
   { id: 'clips', label: 'Clips', title: 'Clip length and count', description: 'Pick one or more lengths, or leave them all off for any length.' },
   { id: 'captions', label: 'Captions', title: 'Captions', description: 'Word-by-word captions burned into each clip. Silent videos are clipped without them.' },
@@ -107,7 +107,7 @@ export function JobForm({ onSubmit, onViewJob, blockedReason, submitting, classN
 
   const index = WIZARD_STEPS.findIndex((s) => s.id === step)
   const meta = WIZARD_STEPS[index]
-  const sourceError = twitchSourceError(draft.source)
+  const sourceError = vodSourceError(draft.source)
   const hasSource = Boolean(draft.source.trim()) && !sourceError
   const modelsValid = draft.clippingMode !== 'advanced' || (isModelId(draft.plannerModel) && isModelId(draft.transcriptionModel))
   const stepValid = step === 'video' ? hasSource && !trim.error : step !== 'clips' || modelsValid

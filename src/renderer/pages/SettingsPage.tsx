@@ -466,7 +466,7 @@ function toolRows(status: ToolStatus | null): ToolRow[] {
       optional: true
     },
     { name: 'FFprobe', ok: status?.ffprobe ?? null },
-    { name: 'yt-dlp', ok: status?.ytdlp ?? null, detail: 'Downloads YouTube videos and Twitch VODs' },
+    { name: 'yt-dlp', ok: status?.ytdlp ?? null, detail: 'Downloads YouTube videos and Twitch and Kick VODs' },
     { name: 'SparkClip clipping engine', ok: status?.engine ?? null, detail: status?.enginePath },
     { name: 'Bridge runner', ok: status?.bridgeRunner ?? null, detail: status?.bridgePath }
   ]

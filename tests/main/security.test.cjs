@@ -236,6 +236,8 @@ test('job validation rejects malformed options and invalid trim intervals', () =
   for (const option of jobContract.DURATION_OPTIONS) assert.doesNotThrow(() => validateJobConfig({ ...job, durationRanges: [option.id] }))
   assert.equal(validateJobConfig({ ...job, videoUrl: 'https://go.twitch.tv/videos/123?t=30s' }).videoUrl, 'https://www.twitch.tv/videos/123')
   for (const videoUrl of ['https://twitch.tv/channel', 'https://clips.twitch.tv/Clip']) assert.throws(() => validateJobConfig({ ...job, videoUrl }), /completed Twitch VOD/)
+  assert.equal(validateJobConfig({ ...job, videoUrl: 'https://www.kick.com/ElZeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c?t=30' }).videoUrl, 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c')
+  for (const videoUrl of ['https://kick.com/elzeein', 'https://kick.com/elzeein/clips/clip_01ABC']) assert.throws(() => validateJobConfig({ ...job, videoUrl }), /completed Kick VOD/)
   for (const patch of [{ maxClips: -1 }, { startTimeSeconds: NaN }, { startTimeSeconds: 5, endTimeSeconds: 3 }, { videoUrl: 'file:///etc/passwd' }, { durationRanges: ['unexpected'] }, { includeCaptions: 'false' }, { layoutVision: 'true' }, { aspectRatio: '1:1' }, { clippingMode: 'unknown' }]) assert.throws(() => validateJobConfig({ ...job, ...patch }))
 })
 

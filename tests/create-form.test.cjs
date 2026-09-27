@@ -14,7 +14,7 @@ const bundled = buildSync({
       export { SourcePicker, isValidSourceLink } from './src/renderer/components/SourcePicker';
       export { framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
       export { parseJobOutput } from './src/shared/job-output';
-      export { twitchVodId, normalizeVideoSource } from './src/shared/video-source';`,
+      export { twitchVodId, kickVod, normalizeVideoSource } from './src/shared/video-source';`,
     resolveDir: path.resolve(__dirname, '..'),
     loader: 'ts'
   },
@@ -183,6 +183,22 @@ test('Twitch VOD links canonicalize while other Twitch pages are rejected', () =
   assert.equal(twitchVodId('https://twitch.tv.evil.test/videos/123'), null)
   const html = renderToStaticMarkup(React.createElement(SourcePicker, { value: 'https://www.twitch.tv/videos/12345', onChange() {} }))
   assert.match(html, /Twitch VOD/)
+  assert.match(html, /Public, completed videos only/)
+  assert.doesNotMatch(html, /<img/)
+})
+
+test('Kick VOD links canonicalize while other Kick pages are rejected', () => {
+  const { normalizeVideoSource, kickVod, SourcePicker } = form.exports
+  const canonical = 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'
+  for (const source of ['https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c', 'https://www.kick.com/ElZeein/videos/191061C4-3C2E-46E8-83EF-ECA789C89B3C/?t=30&utm_source=x', 'https://kick.com:443/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c']) {
+    assert.equal(isValidSourceLink(source), true)
+    assert.equal(normalizeVideoSource(source), canonical)
+    assert.deepEqual(kickVod(source), { channel: 'elzeein', id: '191061c4-3c2e-46e8-83ef-eca789c89b3c' })
+  }
+  for (const source of ['https://kick.com/elzeein', 'https://kick.com/elzeein/clips/clip_01ABC', 'https://kick.com/video/191061c4-3c2e-46e8-83ef-eca789c89b3c', 'https://kick.com/elzeein/videos/nope', 'https://player.kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c', 'https://kick.com:8443/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c']) assert.equal(isValidSourceLink(source), false)
+  assert.equal(kickVod('https://kick.com.evil.test/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'), null)
+  const html = renderToStaticMarkup(React.createElement(SourcePicker, { value: canonical, onChange() {} }))
+  assert.match(html, /Kick VOD/)
   assert.match(html, /Public, completed videos only/)
   assert.doesNotMatch(html, /<img/)
 })

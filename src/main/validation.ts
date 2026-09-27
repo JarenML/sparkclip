@@ -1,4 +1,4 @@
-import { normalizeVideoSource, twitchSourceError } from '../shared/video-source'
+import { normalizeVideoSource, vodSourceError } from '../shared/video-source'
 import { isAbsolute } from 'path'
 import type { ClipJobConfig } from './pipeline-runner'
 import { isWebUrl } from './security'
@@ -9,7 +9,7 @@ export function validateJobConfig(value: unknown): ClipJobConfig {
   if (!value || typeof value !== 'object') throw new Error('Invalid job options')
   const v = value as ClipJobConfig
   if (typeof v.videoUrl !== 'string' || v.videoUrl.length > 8192 || !(isWebUrl(v.videoUrl) || isAbsolute(v.videoUrl))) throw new Error('Choose a video file or an HTTP(S) URL')
-  const sourceError = twitchSourceError(v.videoUrl)
+  const sourceError = vodSourceError(v.videoUrl)
   if (sourceError) throw new Error(sourceError)
   if (typeof v.autoClipCount !== 'boolean' || typeof v.includeCaptions !== 'boolean') throw new Error('Invalid job options')
   if (typeof v.layoutVision !== 'boolean') throw new Error('Invalid vision option')

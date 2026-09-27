@@ -1,4 +1,4 @@
-import { twitchVodId } from '../../shared/video-source'
+import { kickVod, twitchVodId } from '../../shared/video-source'
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -116,6 +116,8 @@ export function youtubeId(url: string): string | null {
 export function sourceLabel(source: string): string {
   const twitchId = twitchVodId(source)
   if (twitchId) return `Twitch VOD · ${twitchId}`
+  const kick = kickVod(source)
+  if (kick) return `Kick VOD · ${kick.channel} · ${kick.id.slice(0, 8)}`
   if (!isUrl(source)) return basename(source)
   try {
     const u = new URL(source)
