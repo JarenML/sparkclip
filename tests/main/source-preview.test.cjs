@@ -43,7 +43,7 @@ test('Kick previews read the title, channel, millisecond duration and thumbnail'
     'https://kick-prod-videos-30-day.s3.us-west-2.amazonaws.com/': () => image()
   })
   const preview = await getSourcePreview(fetchImpl, KICK_URL)
-  assert.deepEqual({ ...preview, thumbnail: preview.thumbnail.slice(0, 23) }, { title: 'Saved stream', channel: 'elzeein', durationSeconds: 6096, thumbnail: 'data:image/jpeg;base64,' })
+  assert.deepEqual({ ...preview, thumbnail: preview.thumbnail.slice(0, 23) }, { title: 'Saved stream', channel: 'elzeein', durationSeconds: 6096, thumbnail: 'data:image/jpeg;base64,', stream: null })
   for (const call of calls) assert.equal(call.init.redirect, 'error')
 })
 
@@ -70,6 +70,7 @@ test('YouTube previews combine oEmbed, the watch page duration and the ytimg thu
   })
   const preview = await getSourcePreview(fetchImpl, 'https://youtu.be/dQw4w9WgXcQ')
   assert.deepEqual([preview.title, preview.channel, preview.durationSeconds], ['Talk', 'Channel', 213])
+  assert.deepEqual(preview.stream, { kind: 'youtube', id: 'dQw4w9WgXcQ' })
   assert.match(preview.thumbnail, /^data:image\/jpeg;base64,/)
 })
 
@@ -106,7 +107,7 @@ test('current Kick links (UUIDv7) are found in the channel listing by their star
   const { fetchImpl, calls } = fakeFetch({
     'https://kick.com/api/v2/channels/sachauzumaki/videos': () => json([
       { start_time: '2026-09-26 02:46:43', session_title: 'Other', duration: 1000 },
-      { start_time: '2026-09-23 03:31:33', session_title: 'Minecraft', duration: 10265000, thumbnail: { src: 'https://images.kick.com/video_thumbnails/a/b/720.webp' } }
+      { start_time: '2026-09-23 03:31:33', session_title: 'Minecraft', duration: 10265000, thumbnail: { src: 'https://images.kick.com/video_thumbnails/a/b/720.webp' }, source: 'https://stream.kick.com/a/media/hls/master.m3u8' }
     ]),
     'https://images.kick.com/': () => image(Buffer.from('RIFF'), 'image/webp')
   })
@@ -114,4 +115,6 @@ test('current Kick links (UUIDv7) are found in the channel listing by their star
   assert.deepEqual([preview.title, preview.channel, preview.durationSeconds], ['Minecraft', 'sachauzumaki', 10265])
   assert.match(preview.thumbnail, /^data:image\/webp;base64,/)
   assert.equal(calls.some((call) => call.url.includes('/api/v1/video/')), false)
+  assert.equal(preview.stream.kind, 'hls')
+  assert.match(preview.stream.url, /^stream-proxy:\/\/hls\//)
 })

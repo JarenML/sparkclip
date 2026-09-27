@@ -1,6 +1,6 @@
 import { kickVod, normalizeVideoSource, twitchVodId, vodSourceError, type SourcePreviewInfo } from '../../shared/video-source'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileVideo, FolderOpen, Link2, UploadCloud, X, Youtube, Twitch } from 'lucide-react'
+import { ChevronUp, FileVideo, FolderOpen, Link2, Play, UploadCloud, X, Youtube, Twitch } from 'lucide-react'
 import { basename, cn, formatTimecode, isUrl, localFileUrl, youtubeId } from '../lib/utils'
 import { getApi } from '../lib/ipc'
 import { Button } from './ui/Button'
@@ -8,12 +8,15 @@ import { TextInput } from './ui/Field'
 import { Badge } from './ui/Badge'
 import { IconTile } from './ui/IconTile'
 import { KickIcon } from './brand/KickIcon'
+import { SourcePlayer, type SeekRequest } from './SourcePlayer'
 
 interface SourcePickerProps {
   value: string
   onChange: (source: string) => void
   /** The source's length in seconds once known (local file metadata or the link's preview), else null. */
   onDurationChange?: (seconds: number | null) => void
+  /** Jumps the preview player (when open) to a time, e.g. while dragging the trim timeline. */
+  seek?: SeekRequest | null
   disabled?: boolean
 }
 
@@ -36,7 +39,7 @@ function displaySourceLink(value: string): string {
   }
 }
 
-export function SourcePicker({ value, onChange, onDurationChange, disabled }: SourcePickerProps): React.JSX.Element {
+export function SourcePicker({ value, onChange, onDurationChange, seek, disabled }: SourcePickerProps): React.JSX.Element {
   const [pickerError, setPickerError] = useState<string | null>(null)
   const browse = useCallback(async () => {
     try {
@@ -52,7 +55,7 @@ export function SourcePicker({ value, onChange, onDurationChange, disabled }: So
 
   if (value) {
     return <>
-      <SourcePreview key={value} source={value} onClear={() => { setPickerError(null); onChange('') }} onReplace={browse} onDurationChange={onDurationChange} disabled={disabled} />
+      <SourcePreview key={value} source={value} onClear={() => { setPickerError(null); onChange('') }} onReplace={browse} onDurationChange={onDurationChange} seek={seek} disabled={disabled} />
       {pickerError && <p role="alert" className="mt-2.5 px-1 text-xs text-danger">{pickerError}</p>}
     </>
   }
@@ -208,12 +211,14 @@ function SourcePreview({
   onClear,
   onReplace,
   onDurationChange,
+  seek,
   disabled
 }: {
   source: string
   onClear: () => void
   onReplace: () => void
   onDurationChange?: (seconds: number | null) => void
+  seek?: SeekRequest | null
   disabled?: boolean
 }): React.JSX.Element {
   const link = isUrl(source)
@@ -224,6 +229,9 @@ function SourcePreview({
   const [durationMs, setDurationMs] = useState<number | null>(null)
   const [mediaFailed, setMediaFailed] = useState(false)
   const [preview, setPreview] = useState<SourcePreviewInfo | null>(null)
+  const [playerOpen, setPlayerOpen] = useState(false)
+  // Local files play from disk; links only when their platform gives a playable stream.
+  const playable = !link || Boolean(preview?.stream)
   const durationSeconds = durationMs != null ? durationMs / 1000 : preview?.durationSeconds ?? null
   const thumbnail = ytId ? null : preview?.thumbnail ?? null
   const reportDuration = useRef(onDurationChange)
@@ -242,80 +250,98 @@ function SourcePreview({
   useEffect(() => () => reportDuration.current?.(null), [])
 
   return (
-    <div className="glass flex items-center gap-3 rounded-2xl p-2.5 pr-3 animate-fade-in">
-      <div className="relative aspect-video h-[72px] shrink-0 overflow-hidden rounded-xl bg-black/40 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
-        {!mediaFailed && ytId && (
-          <img
-            src={`https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`}
-            alt=""
-            className="h-full w-full object-cover"
-            onError={() => setMediaFailed(true)}
-            draggable={false}
-          />
-        )}
-        {!mediaFailed && !link && (
-          <video
-            src={localFileUrl(source)}
-            preload="metadata"
-            muted
-            className="h-full w-full object-cover"
-            onLoadedMetadata={(e) => {
-              const seconds = e.currentTarget.duration
-              if (Number.isFinite(seconds)) {
-                setDurationMs(seconds * 1000)
-                // Seek past a black first frame for a representative still. Not a
-                // #t= fragment: the local-file protocol would treat it as part of the path.
-                e.currentTarget.currentTime = Math.min(2, seconds / 2)
-              }
-            }}
-            onError={() => setMediaFailed(true)}
-          />
-        )}
-        {!mediaFailed && thumbnail && (
-          <img src={thumbnail} alt="" className="h-full w-full object-cover" onError={() => setMediaFailed(true)} draggable={false} />
-        )}
-        {(mediaFailed || (link && !ytId && !thumbnail)) && (
-          <div className="flex h-full w-full items-center justify-center bg-accent/10 text-ink-subtle">
-            {twitchId ? <Twitch className="h-5 w-5" /> : kick ? <KickIcon className="h-5 w-5" /> : link ? <Link2 className="h-5 w-5" /> : <FileVideo className="h-5 w-5" />}
-          </div>
-        )}
-        {durationSeconds != null && (
-          <span className="glass-chip absolute bottom-1 right-1 rounded-full px-1.5 font-mono text-[10px] tabular text-white">
-            {formatTimecode(durationSeconds * 1000)}
-          </span>
-        )}
-      </div>
+    <div className="glass rounded-2xl p-2.5 pr-3 animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="relative aspect-video h-[72px] shrink-0 overflow-hidden rounded-xl bg-black/40 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
+          {!mediaFailed && ytId && (
+            <img
+              src={`https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={() => setMediaFailed(true)}
+              draggable={false}
+            />
+          )}
+          {!mediaFailed && !link && (
+            <video
+              src={localFileUrl(source)}
+              preload="metadata"
+              muted
+              className="h-full w-full object-cover"
+              onLoadedMetadata={(e) => {
+                const seconds = e.currentTarget.duration
+                if (Number.isFinite(seconds)) {
+                  setDurationMs(seconds * 1000)
+                  // Seek past a black first frame for a representative still. Not a
+                  // #t= fragment: the local-file protocol would treat it as part of the path.
+                  e.currentTarget.currentTime = Math.min(2, seconds / 2)
+                }
+              }}
+              onError={() => setMediaFailed(true)}
+            />
+          )}
+          {!mediaFailed && thumbnail && (
+            <img src={thumbnail} alt="" className="h-full w-full object-cover" onError={() => setMediaFailed(true)} draggable={false} />
+          )}
+          {(mediaFailed || (link && !ytId && !thumbnail)) && (
+            <div className="flex h-full w-full items-center justify-center bg-accent/10 text-ink-subtle">
+              {twitchId ? <Twitch className="h-5 w-5" /> : kick ? <KickIcon className="h-5 w-5" /> : link ? <Link2 className="h-5 w-5" /> : <FileVideo className="h-5 w-5" />}
+            </div>
+          )}
+          {durationSeconds != null && (
+            <span className="glass-chip absolute bottom-1 right-1 rounded-full px-1.5 font-mono text-[10px] tabular text-white">
+              {formatTimecode(durationSeconds * 1000)}
+            </span>
+          )}
+        </div>
 
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-base font-semibold text-ink" title={preview?.title ?? displaySource} data-selectable>
-          {preview?.title ?? displaySource}
-        </p>
-        <div className="mt-1.5 flex min-w-0 items-center gap-2">
-          <Badge
-            icon={twitchId ? <Twitch className="h-3 w-3" /> : kick ? <KickIcon className="h-3 w-3" /> : ytId ? <Youtube className="h-3 w-3" /> : link ? <Link2 className="h-3 w-3" /> : <FileVideo className="h-3 w-3" />}
-          >
-            {twitchId ? 'Twitch VOD' : kick ? 'Kick VOD' : ytId ? 'YouTube' : link ? 'Link' : 'Local file'}
-          </Badge>
-          <span className="truncate text-2xs text-ink-subtle">
-            {preview?.channel ? `${preview.channel} · ` : ''}{twitchId || kick ? 'Public, completed videos only' : 'Ready to clip'}
-          </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold text-ink" title={preview?.title ?? displaySource} data-selectable>
+            {preview?.title ?? displaySource}
+          </p>
+          <div className="mt-1.5 flex min-w-0 items-center gap-2">
+            <Badge
+              icon={twitchId ? <Twitch className="h-3 w-3" /> : kick ? <KickIcon className="h-3 w-3" /> : ytId ? <Youtube className="h-3 w-3" /> : link ? <Link2 className="h-3 w-3" /> : <FileVideo className="h-3 w-3" />}
+            >
+              {twitchId ? 'Twitch VOD' : kick ? 'Kick VOD' : ytId ? 'YouTube' : link ? 'Link' : 'Local file'}
+            </Badge>
+            <span className="truncate text-2xs text-ink-subtle">
+              {preview?.channel ? `${preview.channel} · ` : ''}{twitchId || kick ? 'Public, completed videos only' : 'Ready to clip'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5">
+          {playable && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={playerOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              aria-expanded={playerOpen}
+              onClick={() => setPlayerOpen((open) => !open)}
+            >
+              {playerOpen ? 'Hide preview' : 'Preview'}
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={onReplace} disabled={disabled}>
+            Replace
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
+            aria-label="Remove video"
+            onClick={onClear}
+            disabled={disabled}
+            icon={<X className="h-3.5 w-3.5" />}
+          />
         </div>
       </div>
-
-      <div className="flex shrink-0 items-center gap-1.5">
-        <Button variant="secondary" size="sm" onClick={onReplace} disabled={disabled}>
-          Replace
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          iconOnly
-          aria-label="Remove video"
-          onClick={onClear}
-          disabled={disabled}
-          icon={<X className="h-3.5 w-3.5" />}
-        />
-      </div>
+      {playerOpen && playable && (
+        <div className="mt-2.5 animate-fade-in">
+          <SourcePlayer source={source} stream={preview?.stream ?? null} seek={seek} />
+        </div>
+      )}
     </div>
   )
 }

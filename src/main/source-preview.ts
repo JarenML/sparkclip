@@ -1,4 +1,5 @@
 import { kickVod, twitchVodId, youtubeId, type SourcePreviewInfo } from '../shared/video-source'
+import { createStreamSession } from './stream-proxy'
 
 /**
  * Title, duration and thumbnail for a YouTube, Twitch or Kick link, read from
@@ -135,6 +136,8 @@ async function kickPreview(fetchImpl: FetchLike, channel: string, id: string): P
   // the video API doesn't know: find it in the channel's recent VODs instead.
   const startMs = uuidv7Millis(id)
   let stream: unknown
+  // The HLS master playlist: on each listed VOD, at the top of the video API response.
+  let source: unknown
   if (startMs != null) {
     const vods = await getJson(fetchImpl, `https://kick.com/api/v2/channels/${encodeURIComponent(channel)}/videos`)
     let bestDelta = 5001
@@ -146,9 +149,13 @@ async function kickPreview(fetchImpl: FetchLike, channel: string, id: string): P
       }
     }
     if (!stream) throw new Error('Kick VOD not found')
+    source = field(stream, 'source')
   } else {
-    stream = field(await getJson(fetchImpl, `https://kick.com/api/v1/video/${id}`), 'livestream')
+    const video = await getJson(fetchImpl, `https://kick.com/api/v1/video/${id}`)
+    stream = field(video, 'livestream')
+    source = field(video, 'source')
   }
+  const playback = typeof source === 'string' ? createStreamSession(source) : null
   const thumbnail = field(stream, 'thumbnail')
   return {
     title: text(field(stream, 'session_title')),
@@ -156,7 +163,8 @@ async function kickPreview(fetchImpl: FetchLike, channel: string, id: string): P
     // Kick reports milliseconds.
     durationSeconds: seconds(field(stream, 'duration'), 1000),
     // A URL on the video API, { src } on the channel listing.
-    thumbnail: await fetchThumbnail(fetchImpl, typeof thumbnail === 'string' ? thumbnail : field(thumbnail, 'src'))
+    thumbnail: await fetchThumbnail(fetchImpl, typeof thumbnail === 'string' ? thumbnail : field(thumbnail, 'src')),
+    stream: playback ? { kind: 'hls', url: playback } : null
   }
 }
 
@@ -174,7 +182,8 @@ async function twitchPreview(fetchImpl: FetchLike, id: string): Promise<SourcePr
     title: text(field(video, 'title')),
     channel: text(field(video, 'owner', 'displayName'), 80),
     durationSeconds: seconds(field(video, 'lengthSeconds')),
-    thumbnail: await fetchThumbnail(fetchImpl, field(video, 'previewThumbnailURL'))
+    thumbnail: await fetchThumbnail(fetchImpl, field(video, 'previewThumbnailURL')),
+    stream: null
   }
 }
 
@@ -194,7 +203,8 @@ async function youtubePreview(fetchImpl: FetchLike, id: string): Promise<SourceP
     title: text(field(oembed, 'title')),
     channel: text(field(oembed, 'author_name'), 80),
     durationSeconds: duration,
-    thumbnail
+    thumbnail,
+    stream: { kind: 'youtube', id }
   }
 }
 

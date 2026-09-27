@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, shell, protocol } from 'electron'
+import { app, BrowserWindow, nativeTheme, net, shell, protocol } from 'electron'
 import { extname, join } from 'path'
 import { mkdirSync } from 'fs'
 import { Readable } from 'stream'
@@ -13,6 +13,8 @@ import { cleanStaleWorkspaces, stopAllJobsForQuit } from './pipeline-runner'
 import { cancelQueuedJobsForQuit } from './job-manager'
 import { cancelZernioConnect } from './zernio/service'
 import { isAutomationMedia, startAutomationScheduler } from './automations'
+import { handleStreamRequest, STREAM_PROXY_SCHEME } from './stream-proxy'
+import { REPO_URL } from '../shared/brand'
 
 // Catch crashes anywhere in the main process so we get a log line instead
 // of a silent exit. Without these, an unhandled rejection in an IPC handler
@@ -124,6 +126,16 @@ function createWindow(): void {
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
   mainWindow.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   mainWindow.webContents.session.setPermissionCheckHandler(() => false)
+  // The source preview's YouTube embed refuses to play without a Referer
+  // (error 153), and a packaged build loads from file://, which sends none.
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ['https://www.youtube-nocookie.com/embed/*'] },
+    (details, callback) => {
+      const requestHeaders = { ...details.requestHeaders }
+      if (!requestHeaders.Referer) requestHeaders.Referer = `${REPO_URL}/`
+      callback({ requestHeaders })
+    }
+  )
 
   createMenu(mainWindow)
 
@@ -135,7 +147,9 @@ function createWindow(): void {
 }
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } }
+  { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } },
+  // Source preview streams (see stream-proxy.ts); hls.js fetches them from the renderer.
+  { scheme: STREAM_PROXY_SCHEME, privileges: { stream: true, supportFetchAPI: true, corsEnabled: true } }
 ])
 
 app.whenReady().then(() => {
@@ -214,6 +228,8 @@ app.whenReady().then(() => {
       return new Response('Media unavailable', { status: 403 })
     }
   })
+
+  protocol.handle(STREAM_PROXY_SCHEME, (request) => handleStreamRequest((url, init) => net.fetch(url, init), request))
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

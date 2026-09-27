@@ -9,6 +9,7 @@ import { MAX_PARALLEL_JOBS } from '../../shared/jobs'
 import { CaptionPresetPicker, CAPTION_PRESET_NAMES } from './CaptionPresetPicker'
 import { SourcePicker } from './SourcePicker'
 import { TrimTimeline } from './TrimTimeline'
+import type { SeekRequest } from './SourcePlayer'
 import { Panel } from './ui/Panel'
 import { Switch } from './ui/Switch'
 import { Button } from './ui/Button'
@@ -233,12 +234,13 @@ function Stepper({ current, reachable, onSelect }: { current: WizardStep; reacha
 
 function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; update: Update; trimError: string | null; disabled?: boolean }): React.JSX.Element {
   const [duration, setDuration] = useState<number | null>(null)
+  const [seek, setSeek] = useState<SeekRequest | null>(null)
   const typedStart = parseTimecode(draft.trimStart)
   const typedEnd = parseTimecode(draft.trimEnd)
   const asText = (seconds: number | null): string => (seconds == null ? '' : formatTimecode(seconds * 1000))
   return (
     <div className="space-y-3">
-      <SourcePicker value={draft.source} onChange={(source) => update({ source })} onDurationChange={setDuration} disabled={disabled} />
+      <SourcePicker value={draft.source} onChange={(source) => update({ source })} onDurationChange={setDuration} seek={seek} disabled={disabled} />
       <SettingRow
         title="Clip only part of the video"
         description="Set a start and end time. Leave either empty for an open range."
@@ -252,6 +254,7 @@ function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; u
               start={Number.isNaN(typedStart) ? null : typedStart}
               end={Number.isNaN(typedEnd) ? null : typedEnd}
               onChange={(start, end) => update({ trimStart: asText(start), trimEnd: asText(end) })}
+              onScrub={(time) => setSeek({ time, key: Date.now() })}
               disabled={disabled}
             />
           )}

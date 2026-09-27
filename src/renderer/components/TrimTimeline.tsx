@@ -10,6 +10,8 @@ interface TrimTimelineProps {
   start: number | null
   end: number | null
   onChange: (start: number | null, end: number | null) => void
+  /** Called with the time a handle moved to, so a preview can show that frame. */
+  onScrub?: (seconds: number) => void
   disabled?: boolean
 }
 
@@ -29,7 +31,7 @@ function label(seconds: number): string {
  * report whole seconds; a handle at either edge means an open bound, so the
  * typed start/end fields stay empty in that case.
  */
-export function TrimTimeline({ duration, start, end, onChange, disabled }: TrimTimelineProps): React.JSX.Element {
+export function TrimTimeline({ duration, start, end, onChange, onScrub, disabled }: TrimTimelineProps): React.JSX.Element {
   const track = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState<Handle | null>(null)
   const total = Math.max(MIN_RANGE, Math.floor(duration))
@@ -42,8 +44,15 @@ export function TrimTimeline({ duration, start, end, onChange, disabled }: TrimT
 
   const move = (handle: Handle, value: number): void => {
     const rounded = Math.round(value)
-    if (handle === 'start') emit(clamp(rounded, 0, to - MIN_RANGE), to)
-    else emit(from, clamp(rounded, from + MIN_RANGE, total))
+    if (handle === 'start') {
+      const next = clamp(rounded, 0, to - MIN_RANGE)
+      emit(next, to)
+      onScrub?.(next)
+    } else {
+      const next = clamp(rounded, from + MIN_RANGE, total)
+      emit(from, next)
+      onScrub?.(next)
+    }
   }
 
   const valueAt = (clientX: number): number => {

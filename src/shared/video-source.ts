@@ -76,4 +76,9 @@ export interface SourcePreviewInfo {
   durationSeconds: number | null
   /** A data: URL, so the renderer needs no extra image hosts. */
   thumbnail: string | null
+  /** How to play the video in the preview player, when the platform allows it. */
+  stream: SourceStream | null
 }
+
+/** hls: a stream-proxy:// playlist served by the main process; youtube: the embed player. */
+export type SourceStream = { kind: 'hls'; url: string } | { kind: 'youtube'; id: string }
