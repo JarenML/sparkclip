@@ -51,3 +51,29 @@ export function kickSourceError(value: string): string | null {
 export function vodSourceError(value: string): string | null {
   return twitchSourceError(value) ?? kickSourceError(value)
 }
+
+/** Video id for youtube.com/watch, youtu.be and /shorts links. */
+export function youtubeId(url: string): string | null {
+  try {
+    const u = new URL(url)
+    const host = u.hostname.replace(/^www\.|^m\./, '')
+    if (host === 'youtu.be') return u.pathname.slice(1) || null
+    if (host === 'youtube.com' || host === 'music.youtube.com') {
+      if (u.searchParams.get('v')) return u.searchParams.get('v')
+      const match = u.pathname.match(/^\/(shorts|live|embed)\/([^/?#]+)/)
+      return match?.[2] ?? null
+    }
+  } catch {
+    // not a URL
+  }
+  return null
+}
+
+/** What a link's platform says about the video before it is downloaded. */
+export interface SourcePreviewInfo {
+  title: string | null
+  channel: string | null
+  durationSeconds: number | null
+  /** A data: URL, so the renderer needs no extra image hosts. */
+  thumbnail: string | null
+}

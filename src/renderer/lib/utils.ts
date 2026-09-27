@@ -95,22 +95,7 @@ export function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path
 }
 
-/** Video id for youtube.com/watch, youtu.be and /shorts links. */
-export function youtubeId(url: string): string | null {
-  try {
-    const u = new URL(url)
-    const host = u.hostname.replace(/^www\.|^m\./, '')
-    if (host === 'youtu.be') return u.pathname.slice(1) || null
-    if (host === 'youtube.com' || host === 'music.youtube.com') {
-      if (u.searchParams.get('v')) return u.searchParams.get('v')
-      const match = u.pathname.match(/^\/(shorts|live|embed)\/([^/?#]+)/)
-      return match?.[2] ?? null
-    }
-  } catch {
-    // not a URL
-  }
-  return null
-}
+export { youtubeId } from '../../shared/video-source'
 
 /** Short human label for a clip source: file name, or host + path for links. */
 export function sourceLabel(source: string): string {

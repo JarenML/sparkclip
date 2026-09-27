@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron'
 import { existsSync, realpathSync } from 'fs'
 import { loadSettings, publicSettings, replaceApiKey, savePublicSettings, type ApiKeyName, type PublicSettings } from './settings-store'
 import { ensureOutputDir, getJobHistory, getJobOutput, generateThumbnail } from './file-manager'
@@ -16,6 +16,7 @@ import { logger, getLogFilePath } from './logger'
 import { assertAbsolutePath, assertMediaPath, assertTrustedSender, authorizeMedia, isTrustedExternalUrl, isWebUrl, isWithinDirectory, openAuthorizedMedia } from './security'
 import { assertPublicWebUrl } from './network-policy'
 import { validateJobConfig } from './validation'
+import { getSourcePreview } from './source-preview'
 import { getModelCatalog, resolveAdvancedModels } from './openrouter-models'
 import { randomUUID } from 'crypto'
 import { resolveBinary, supportsCaptionFilter } from './tools'
@@ -251,6 +252,11 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const thumbnail = await generateThumbnail(videoPath, seekSeconds)
     if (thumbnail) authorizeMedia(thumbnail)
     return thumbnail
+  })
+
+  handle('source:preview', (_event, source: unknown) => {
+    if (typeof source !== 'string' || source.length > 2048 || !isWebUrl(source)) return null
+    return getSourcePreview((url, init) => net.fetch(url, init), source)
   })
 
   handle('shell:openPath', async (_event, path: unknown) => {

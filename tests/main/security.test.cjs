@@ -187,6 +187,7 @@ test('the native picker authorizes media and shell opening rejects aliased appli
       './security': security,
       './network-policy': {},
       './validation': {},
+      './source-preview': {},
       './openrouter-models': {},
       './tools': {},
       './zernio/service': {},
