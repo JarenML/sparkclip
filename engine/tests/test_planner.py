@@ -140,6 +140,15 @@ class TestScoring:
         assert IntelligencePlannerService._score_clip({"virality_score": 0.7}) == 0.7
         assert IntelligencePlannerService._score_clip({}) == 0.5
 
+    def test_rubric_scores_are_kept_per_dimension(self):
+        scores = IntelligencePlannerService._rubric_scores(clip(0, 30, (9, 15, -2, 6.25, 3)))
+        assert scores == {"hook": 9.0, "standalone": 10.0, "arc": 0.0, "quotability": 6.2, "ending": 3.0}
+
+    def test_invalid_rubric_scores_are_left_out(self):
+        bad = {"scores": {"hook": 8, "standalone": "x", "arc": None, "quotability": float("nan"), "extra": 10}}
+        assert IntelligencePlannerService._rubric_scores(bad) == {"hook": 8.0}
+        assert IntelligencePlannerService._rubric_scores({}) == {}
+
 
 class TestFinalizeClips:
     def test_drops_overlaps_keeps_best_and_caps(self):

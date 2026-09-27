@@ -48,6 +48,9 @@ class ClipPlanSegment:
     end_time_ms: int
     virality_score: float
     layout_type: str = "center_crop"
+    # Per-dimension rubric scores (0-10) keyed by RUBRIC_DIMENSIONS; empty when
+    # the model returned none. virality_score is their mean / 10.
+    scores: dict[str, float] = field(default_factory=dict)
     summary: Optional[str] = None
     tags: list[str] = field(default_factory=list)
     # Punch words to highlight in captions, as spoken in the clip.
@@ -1278,6 +1281,7 @@ Do not overlap clips by more than 5 seconds."""
                     start_time_ms=start_time_ms,
                     end_time_ms=end_time_ms,
                     virality_score=self._score_clip(clip),
+                    scores=self._rubric_scores(clip),
                     layout_type=layout_type,
                     summary=clip.get("summary"),
                     tags=clip.get("tags", []),
@@ -1409,21 +1413,29 @@ Do not overlap clips by more than 5 seconds."""
         return spaced
 
     @staticmethod
-    def _score_clip(clip: dict) -> float:
+    def _rubric_scores(clip: dict) -> dict[str, float]:
+        """The model's per-dimension scores, clamped to 0-10; invalid ones are left out."""
+        scores = clip.get("scores")
+        result: dict[str, float] = {}
+        if isinstance(scores, dict):
+            for dim in RUBRIC_DIMENSIONS:
+                try:
+                    value = float(scores[dim])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    result[dim] = round(min(10.0, max(0.0, value)), 1)
+        return result
+
+    @classmethod
+    def _score_clip(cls, clip: dict) -> float:
         """Virality score in [0, 1]: mean of the rubric scores / 10.
 
         Falls back to a model-supplied `virality_score`, then 0.5.
         """
-        scores = clip.get("scores")
-        if isinstance(scores, dict):
-            values = []
-            for dim in RUBRIC_DIMENSIONS:
-                try:
-                    values.append(min(10.0, max(0.0, float(scores[dim]))))
-                except (KeyError, TypeError, ValueError):
-                    continue
-            if values:
-                return round(sum(values) / len(values) / 10.0, 3)
+        values = list(cls._rubric_scores(clip).values())
+        if values:
+            return round(sum(values) / len(values) / 10.0, 3)
         try:
             return min(1.0, max(0.0, float(clip.get("virality_score", 0.5))))
         except (TypeError, ValueError):

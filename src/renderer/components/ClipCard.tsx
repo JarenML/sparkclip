@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, ImageOff, ListPlus, Play, Send, TrendingUp, TriangleAlert } from 'lucide-react'
+import { FolderOpen, ImageOff, ListPlus, Play, Send, Star, TrendingUp, TriangleAlert } from 'lucide-react'
 import { cn, formatTimecode, isMac, localFileUrl } from '../lib/utils'
 import { getApi } from '../lib/ipc'
 import { clipFilePath, loadThumbnail } from '../lib/thumbnails'
 import type { ClipArtifact } from '../store/use-job-store'
+import { meetsAllCriteria, RUBRIC, RUBRIC_PASS_SCORE, type ClipScores } from '../../shared/job-output'
 import { Checkbox } from './ui/Checkbox'
 import { Badge } from './ui/Badge'
 import { Skeleton } from './ui/Skeleton'
@@ -22,6 +23,8 @@ interface ClipCardProps {
   clip: ClipArtifact
   vertical: boolean
   topPick?: boolean
+  /** Show the per-criterion score breakdown under the card. */
+  showScores?: boolean
   selected: boolean
   selecting: boolean
   onToggleSelect: () => void
@@ -36,6 +39,7 @@ export function ClipCard({
   clip,
   vertical,
   topPick,
+  showScores,
   selected,
   selecting,
   onToggleSelect,
@@ -51,6 +55,7 @@ export function ClipCard({
   const [actionError, setActionError] = useState<string | null>(null)
   const title = clip.summary || `Clip ${clip.clip_index + 1}`
   const score = (clip.virality_score * 10).toFixed(1)
+  const allCriteria = meetsAllCriteria(clip.scores)
   const clipVertical = aspect == null ? vertical : aspect < 1
   const layout = clipVertical && Object.prototype.hasOwnProperty.call(LAYOUT_LABELS, clip.layout_type)
     ? LAYOUT_LABELS[clip.layout_type]
@@ -171,6 +176,16 @@ export function ClipCard({
               Top pick
             </span>
           )}
+          {allCriteria && (
+            <span
+              className="glass-chip pointer-events-auto inline-flex h-5 w-5 items-center justify-center rounded-full"
+              title={`Meets every criterion: all five scores are ${RUBRIC_PASS_SCORE} or higher`}
+              aria-label="Meets every criterion"
+              role="img"
+            >
+              <Star className="h-3 w-3 text-brand-gold" fill="currentColor" />
+            </span>
+          )}
           <span
             className="glass-chip pointer-events-auto inline-flex h-5 items-center gap-1 rounded-full px-1.5 font-mono text-2xs font-medium tabular text-white"
             title="Virality score"
@@ -212,9 +227,34 @@ export function ClipCard({
             </span>
           </Badge>
         )}
+        {showScores && <ScoreBreakdown scores={clip.scores} />}
         {actionError && <p role="alert" className="mt-1.5 text-xs text-danger">{actionError}</p>}
       </div>
     </article>
+  )
+}
+
+/** One row per criterion: name, a 0-10 bar and the score. Scores under the pass mark are dimmed. */
+export function ScoreBreakdown({ scores }: { scores: ClipScores | null }): React.JSX.Element {
+  if (!scores) {
+    return <p className="mt-2 text-2xs text-ink-faint">Scores per criterion were not saved for this run.</p>
+  }
+  return (
+    <dl className="mt-2 space-y-1 border-t border-line pt-2" aria-label="Score per criterion">
+      {RUBRIC.map(({ key, label, hint }) => {
+        const value = scores[key]
+        const passed = value >= RUBRIC_PASS_SCORE
+        return (
+          <div key={key} className="grid grid-cols-[minmax(0,1fr)_40px_24px] items-center gap-1.5" title={`${label}: ${hint}`}>
+            <dt className="truncate text-2xs text-ink-subtle">{label}</dt>
+            <dd className="h-1 overflow-hidden rounded-full bg-black/35" aria-hidden>
+              <div className={cn('h-full rounded-full', passed ? 'bg-accent' : 'bg-warning/70')} style={{ width: `${value * 10}%` }} />
+            </dd>
+            <dd className={cn('text-right font-mono text-2xs tabular', passed ? 'text-ink' : 'text-warning')}>{value.toFixed(value % 1 ? 1 : 0)}</dd>
+          </div>
+        )
+      })}
+    </dl>
   )
 }
 
