@@ -30,7 +30,7 @@ type SecretKey = (typeof SECRET_KEYS)[number]
 const DEFAULT_SETTINGS: AppSettings = {
   openrouterApiKey: '',
   zernioApiKey: '',
-  outputDirectory: join(app.getPath('home'), 'BridgeClip'),
+  outputDirectory: join(app.getPath('home'), 'SparkClip'),
   pythonPath: process.platform === 'win32' ? 'python' : 'python3',
   customVocabulary: ''
 }

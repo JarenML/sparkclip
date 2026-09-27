@@ -7,13 +7,13 @@ function Assert-Signature([string]$Path) {
     if ($name -cne $Publisher) { throw "Unexpected publisher: $name" }
 }
 Assert-Signature $Installer
-$destination = Join-Path $env:RUNNER_TEMP 'BridgeClip installed acceptance'
+$destination = Join-Path $env:RUNNER_TEMP 'SparkClip installed acceptance'
 if (Test-Path $destination) { throw 'Installation directory already exists' }
 $process = Start-Process -FilePath (Resolve-Path $Installer) -ArgumentList @('/S', "/D=$destination") -Wait -PassThru
 if ($process.ExitCode -ne 0) { throw 'NSIS installation failed' }
-$application = Join-Path $destination 'BridgeClip.exe'
+$application = Join-Path $destination 'SparkClip.exe'
 Assert-Signature $application
-Assert-Signature (Join-Path $destination 'Uninstall BridgeClip.exe')
+Assert-Signature (Join-Path $destination 'Uninstall SparkClip.exe')
 $expected = (Get-Content package.json -Raw | ConvertFrom-Json).version
 $actual = (Get-Item $application).VersionInfo.ProductVersion
 # Windows PE version resources use four numeric components; npm semver uses three.

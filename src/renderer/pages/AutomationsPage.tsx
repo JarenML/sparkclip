@@ -475,7 +475,7 @@ export function AutomationsPage({ onNavigate }: { onNavigate: (page: PageName) =
                   <Row
                     label="Schedule"
                     labelId="automation-schedule"
-                    hint="One clip posts at each time, daily. BridgeClip must be open; after sleep, a run can start up to 5 minutes late."
+                    hint="One clip posts at each time, daily. SparkClip must be open; after sleep, a run can start up to 5 minutes late."
                   >
                     <div role="group" aria-labelledby="automation-schedule" className="flex flex-wrap items-center gap-1">
                       {draft.times.map((time) => (

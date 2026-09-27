@@ -178,12 +178,12 @@ test('connect: API failures come back as structured errors the UI can act on', a
   assert.equal(service.isCallbackPending(), false)
 })
 
-test('connect: with no profile it uses the default one, or creates one for BridgeClip', async (t) => {
+test('connect: with no profile it uses the default one, or creates one for SparkClip', async (t) => {
   const { service, mock, getWindow } = await setup(t, { mockOptions: { withDefaultProfile: false } })
   const first = await service.connectZernioAccount('threads', null, undefined, getWindow)
   assert.equal(first.status, 'pending')
   assert.equal(mock.state.profiles.length, 1)
-  assert.equal(mock.state.profiles[0].name, 'BridgeClip')
+  assert.equal(mock.state.profiles[0].name, 'SparkClip')
   assert.equal(first.profileId, mock.state.profiles[0]._id)
   const second = await service.connectZernioAccount('threads', null, undefined, getWindow)
   assert.equal(second.profileId, first.profileId, 'no duplicate profile')

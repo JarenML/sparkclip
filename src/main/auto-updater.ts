@@ -122,8 +122,8 @@ function registerIpc(): void {
             buttons: ['Replace', 'Cancel'],
             defaultId: 1,
             cancelId: 1,
-            message: 'Replace the BridgeClip in your Applications folder?',
-            detail: 'Applications already has a copy of BridgeClip. Replacing it moves that copy to the Trash.'
+            message: 'Replace the SparkClip in your Applications folder?',
+            detail: 'Applications already has a copy of SparkClip. Replacing it moves that copy to the Trash.'
           }
           const window = getWindow()
           return (window ? dialog.showMessageBoxSync(window, options) : dialog.showMessageBoxSync(options)) === 0
