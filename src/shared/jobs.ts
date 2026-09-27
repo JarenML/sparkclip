@@ -17,6 +17,8 @@ export interface ClipJobRequest {
   pacing: string
   /** Export speed for every clip. Older requests default to normal speed. */
   videoSpeed?: number
+  /** Language code for clip titles, or "auto" for the spoken language. Older requests use "auto". */
+  titleLanguage?: string
   includeCaptions: boolean
   captionPreset: string
   startTimeSeconds: number | null

@@ -79,6 +79,13 @@ class BridgeTests(unittest.TestCase):
             with self.subTest(speed=speed), self.assertRaises(ValueError):
                 bridge.validate_config(self.config(video_speed=speed))
 
+    def test_title_language_validation(self):
+        for language in (None, "auto", "es", "en", "ja"):
+            self.assertIsNotNone(bridge.validate_config(self.config(title_language=language)))
+        for language in ("xx", "ES", "spanish", 1, "es;rm"):
+            with self.subTest(language=language), self.assertRaises(ValueError):
+                bridge.validate_config(self.config(title_language=language))
+
     def test_rejects_invalid_config_without_importing_bridgeclip(self):
         for value in ([], None, "config", self.config(contract_version=None), self.config(contract_version=1), self.config(layout_vision_enabled=None), self.config(job_id="../escape"), self.config(video_url="file:///etc/passwd"), self.config(max_clips=True), self.config(aspect_ratio="1:1"), self.config(layout_style="unknown"), self.config(pacing="unknown"), self.config(clipping_mode="unknown"), self.config(duration_ranges=["unknown"])):
             with self.subTest(value=value), self.assertRaises(ValueError):

@@ -80,6 +80,7 @@ test('clipping mode is selectable and economy disables paid vision in the submit
   assert.equal(request.clippingMode, 'economy')
   assert.equal(request.layoutVision, false)
   assert.equal(buildJobRequest({ ...draft, clippingMode: 'quality' }, { start: null, end: null }).layoutVision, true)
+  assert.equal(buildJobRequest({ ...draft, titleLanguage: 'es' }, { start: null, end: null }).titleLanguage, 'es')
 })
 
 test('format and framing radio groups each expose one keyboard tab stop', () => {

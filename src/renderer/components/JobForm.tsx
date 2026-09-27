@@ -16,7 +16,8 @@ import { TextInput } from './ui/Field'
 import { IconTile } from './ui/IconTile'
 import { SettingRow } from './ui/SettingRow'
 import { onRadioKeyDown } from './ui/Segmented'
-import { DURATION_OPTIONS, VIDEO_SPEED_OPTIONS } from '../../shared/job-contract'
+import { DURATION_OPTIONS, TITLE_LANGUAGES, VIDEO_SPEED_OPTIONS } from '../../shared/job-contract'
+import { Select } from './ui/Select'
 import { isModelId } from '../../shared/openrouter-models'
 import { useModelStore } from '../store/use-model-store'
 import { ModelPicker } from './ModelPicker'
@@ -73,6 +74,7 @@ export function buildJobRequest(draft: ClipDraft, trim: { start: number | null; 
     videoSpeed: draft.videoSpeed ?? 1,
     includeCaptions: draft.includeCaptions,
     captionPreset: draft.captionPreset,
+    titleLanguage: draft.titleLanguage,
     startTimeSeconds: trim.start,
     endTimeSeconds: trim.end,
     bannerPlatform: null,
@@ -505,6 +507,20 @@ function CaptionsStep({ draft, update }: { draft: ClipDraft; update: Update }): 
           disabled={!draft.includeCaptions}
         />
       </div>
+      <SettingRow
+        title="Title language"
+        description="Language of each clip's title, description and tags. Captions always use the spoken words."
+        control={
+          <Select
+            aria-label="Title language"
+            size="sm"
+            className="w-44"
+            value={draft.titleLanguage}
+            options={TITLE_LANGUAGES.map(({ code, label }) => ({ value: code, label }))}
+            onChange={(titleLanguage) => update({ titleLanguage })}
+          />
+        }
+      />
     </div>
   )
 }
@@ -533,7 +549,8 @@ function ReviewStep({ draft, trim, onEdit }: {
     { step: 'format', label: 'Speed', value: `${draft.videoSpeed ?? 1}×${(draft.videoSpeed ?? 1) === 1 ? ' · Normal' : ' · All exported clips'}` },
     { step: 'clips', label: 'Mode', value: draft.clippingMode === 'advanced' ? 'Advanced · custom models' : draft.clippingMode === 'economy' ? 'Economy · lower cost' : 'Quality · higher accuracy' },
     { step: 'clips', label: 'Clips', value: `${lengths}${(draft.videoSpeed ?? 1) > 1 && draft.durations.length > 0 ? ' of source footage' : ''} · ${draft.autoClipCount ? 'AI decides how many' : `Up to ${draft.maxClips}`}` },
-    { step: 'captions', label: 'Captions', value: draft.includeCaptions ? CAPTION_PRESET_NAMES[draft.captionPreset] ?? draft.captionPreset : 'Off' }
+    { step: 'captions', label: 'Captions', value: draft.includeCaptions ? CAPTION_PRESET_NAMES[draft.captionPreset] ?? draft.captionPreset : 'Off' },
+    { step: 'captions', label: 'Titles', value: TITLE_LANGUAGES.find((language) => language.code === draft.titleLanguage)?.label ?? 'Same as the video' }
   ]
   if (draft.clippingMode === 'advanced') rows.splice(5, 0,
     { step: 'clips', label: 'Transcribe', value: draft.transcriptionModel || 'Choose a model' },

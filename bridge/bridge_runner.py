@@ -31,6 +31,8 @@ _protocol = None
 
 # Mirrors DURATION_OPTIONS in src/shared/job-contract.ts.
 DURATION_RANGE_IDS = ("xshort", "short", "medium", "long", "xlong", "extended", "feature")
+# Mirrors TITLE_LANGUAGES in src/shared/job-contract.ts.
+TITLE_LANGUAGE_CODES = ("auto", "en", "es", "pt", "fr", "de", "it", "nl", "pl", "tr", "ru", "ar", "hi", "ja", "ko", "zh")
 
 # Known failure classes -> (message, hint). Raw engine errors can contain
 # request URLs, proxy credentials and local paths, so only these fixed strings
@@ -251,6 +253,7 @@ async def run(config: dict) -> bool:
         aspect_ratio=config.get("aspect_ratio", "9:16"),
         layout_style=config.get("layout_style") or "auto",
         pacing=config.get("pacing") or "tight",
+        title_language=config.get("title_language") or "auto",
         video_speed=config.get("video_speed", 1.0),
         include_captions=config.get("include_captions", True),
         caption_style=caption_style,
@@ -336,6 +339,8 @@ def validate_config(config: object) -> dict:
         raise ValueError("Invalid layout style")
     if config.get("pacing", "tight") not in ("tight", "natural"):
         raise ValueError("Invalid pacing")
+    if (config.get("title_language") or "auto") not in TITLE_LANGUAGE_CODES:
+        raise ValueError("Invalid title language")
     speed = config.get("video_speed", 1.0)
     if type(speed) not in (int, float) or not 1 <= speed <= 2:
         raise ValueError("Video speed must be between 1x and 2x")

@@ -19,3 +19,31 @@ export function isVideoSpeed(value: unknown): value is number {
 
 export type DurationId = (typeof DURATION_OPTIONS)[number]['id']
 export const DURATION_IDS: readonly string[] = DURATION_OPTIONS.map((option) => option.id)
+
+/**
+ * Languages clip titles, descriptions and tags can be written in. "auto"
+ * uses the language spoken in the video. Mirrored in bridge_runner.py
+ * (TITLE_LANGUAGE_CODES) and the planner (TITLE_LANGUAGE_NAMES).
+ */
+export const TITLE_LANGUAGES = [
+  { code: 'auto', label: 'Same as the video' },
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'fr', label: 'French' },
+  { code: 'de', label: 'German' },
+  { code: 'it', label: 'Italian' },
+  { code: 'nl', label: 'Dutch' },
+  { code: 'pl', label: 'Polish' },
+  { code: 'tr', label: 'Turkish' },
+  { code: 'ru', label: 'Russian' },
+  { code: 'ar', label: 'Arabic' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'zh', label: 'Chinese' }
+] as const
+
+export function isTitleLanguage(value: unknown): value is string {
+  return TITLE_LANGUAGES.some((language) => language.code === value)
+}
