@@ -1,4 +1,4 @@
-import { normalizeVideoSource, twitchSourceError, twitchVodId } from '../../shared/video-source'
+import { kickVod, normalizeVideoSource, twitchVodId, vodSourceError } from '../../shared/video-source'
 import { useCallback, useRef, useState } from 'react'
 import { FileVideo, FolderOpen, Link2, UploadCloud, X, Youtube, Twitch } from 'lucide-react'
 import { basename, cn, formatTimecode, isUrl, localFileUrl, youtubeId } from '../lib/utils'
@@ -7,6 +7,7 @@ import { Button } from './ui/Button'
 import { TextInput } from './ui/Field'
 import { Badge } from './ui/Badge'
 import { IconTile } from './ui/IconTile'
+import { KickIcon } from './brand/KickIcon'
 
 interface SourcePickerProps {
   value: string
@@ -18,7 +19,7 @@ interface SourcePickerProps {
 export function isValidSourceLink(value: string): boolean {
   try {
     const url = new URL(value.trim())
-    return (url.protocol === 'https:' || url.protocol === 'http:') && Boolean(url.hostname) && !url.username && !url.password && !twitchSourceError(value)
+    return (url.protocol === 'https:' || url.protocol === 'http:') && Boolean(url.hostname) && !url.username && !url.password && !vodSourceError(value)
   } catch {
     return false
   }
@@ -79,7 +80,7 @@ function DropZone({
     const link = text.trim()
     if (!link) return
     if (!isValidSourceLink(link)) {
-      setError(twitchSourceError(link) ?? 'Paste a valid HTTP(S) link without a username or password.')
+      setError(vodSourceError(link) ?? 'Paste a valid HTTP(S) link without a username or password.')
       return
     }
     setError(null)
@@ -152,6 +153,7 @@ function DropZone({
           <div role="group" aria-label="Supported video links" className="mt-2 flex flex-wrap items-center gap-2">
             <Badge icon={<Youtube aria-hidden className="h-3.5 w-3.5 text-[#ff0033]" />}>YouTube</Badge>
             <Badge icon={<Twitch aria-hidden className="h-3.5 w-3.5 text-[#a970ff]" />}>Twitch VODs</Badge>
+            <Badge icon={<KickIcon aria-hidden className="h-3.5 w-3.5 text-[#53fc18]" />}>Kick VODs</Badge>
           </div>
         </div>
       </div>
@@ -161,7 +163,7 @@ function DropZone({
           inputSize="lg"
           className="min-w-0 flex-1"
           value={draft}
-          placeholder="YouTube, Twitch VOD or direct video link"
+          placeholder="YouTube, Twitch or Kick VOD, or direct video link"
           aria-label="Video link"
           leading={<Link2 className="h-4 w-4" />}
           onChange={(e) => {
@@ -173,7 +175,7 @@ function DropZone({
           disabled={disabled}
           onPaste={(e) => {
             const text = e.clipboardData.getData('text')
-            if (isValidSourceLink(text) || twitchSourceError(text)) {
+            if (isValidSourceLink(text) || vodSourceError(text)) {
               e.preventDefault()
               submitLink(text)
             }
@@ -213,6 +215,7 @@ function SourcePreview({
   const link = isUrl(source)
   const ytId = link ? youtubeId(source) : null
   const twitchId = link ? twitchVodId(source) : null
+  const kick = link ? kickVod(source) : null
   const displaySource = link ? displaySourceLink(source) : basename(source)
   const [durationMs, setDurationMs] = useState<number | null>(null)
   const [mediaFailed, setMediaFailed] = useState(false)
@@ -249,7 +252,7 @@ function SourcePreview({
         )}
         {(mediaFailed || (link && !ytId)) && (
           <div className="flex h-full w-full items-center justify-center bg-accent/10 text-ink-subtle">
-            {twitchId ? <Twitch className="h-5 w-5" /> : link ? <Link2 className="h-5 w-5" /> : <FileVideo className="h-5 w-5" />}
+            {twitchId ? <Twitch className="h-5 w-5" /> : kick ? <KickIcon className="h-5 w-5" /> : link ? <Link2 className="h-5 w-5" /> : <FileVideo className="h-5 w-5" />}
           </div>
         )}
         {durationMs != null && (
@@ -265,11 +268,11 @@ function SourcePreview({
         </p>
         <div className="mt-1.5 flex min-w-0 items-center gap-2">
           <Badge
-            icon={twitchId ? <Twitch className="h-3 w-3" /> : ytId ? <Youtube className="h-3 w-3" /> : link ? <Link2 className="h-3 w-3" /> : <FileVideo className="h-3 w-3" />}
+            icon={twitchId ? <Twitch className="h-3 w-3" /> : kick ? <KickIcon className="h-3 w-3" /> : ytId ? <Youtube className="h-3 w-3" /> : link ? <Link2 className="h-3 w-3" /> : <FileVideo className="h-3 w-3" />}
           >
-            {twitchId ? 'Twitch VOD' : ytId ? 'YouTube' : link ? 'Link' : 'Local file'}
+            {twitchId ? 'Twitch VOD' : kick ? 'Kick VOD' : ytId ? 'YouTube' : link ? 'Link' : 'Local file'}
           </Badge>
-          <span className="truncate text-2xs text-ink-subtle">{twitchId ? 'Public, completed videos only' : 'Ready to clip'}</span>
+          <span className="truncate text-2xs text-ink-subtle">{twitchId || kick ? 'Public, completed videos only' : 'Ready to clip'}</span>
         </div>
       </div>
 

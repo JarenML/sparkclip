@@ -226,6 +226,22 @@ class BridgeTests(unittest.TestCase):
                     self.assertNotIn("https:", value)
         self.assertIn("signed out", bridge.describe_failure("Twitch VOD unavailable")["hint"])
 
+    def test_kick_failures_are_actionable_and_safe_for_the_desktop(self):
+        cases = {
+            "Unsupported Kick source": "Choose a public, completed Kick VOD.",
+            "Kick VOD is not completed": "This Kick video is still live or processing.",
+            "Kick VOD duration is invalid or too long": "This Kick video has no usable duration or exceeds the six hour limit.",
+            "Kick VOD unavailable": "The Kick VOD could not be downloaded.",
+        }
+        for error, message in cases.items():
+            with self.subTest(error=error):
+                result = bridge.describe_failure(error)
+                self.assertEqual(result["message"], message)
+                self.assertTrue(result["hint"])
+                for value in result.values():
+                    self.assertNotIn("/", value)
+                    self.assertNotIn("https:", value)
+
     def test_engine_stdout_cannot_corrupt_protocol(self):
         script = (
             "import os, subprocess, sys; import bridge_runner as b\n"

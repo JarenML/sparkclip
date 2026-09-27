@@ -9,6 +9,15 @@ TWITCH_ERRORS = {
     "twitch_unavailable": "Twitch VOD unavailable",
 }
 
+KICK_ERRORS = {
+    "kick_unsupported": "Unsupported Kick source",
+    "kick_not_completed": "Kick VOD is not completed",
+    "kick_duration": "Kick VOD duration is invalid or too long",
+    "kick_unavailable": "Kick VOD unavailable",
+}
+
+VOD_ERRORS = {**TWITCH_ERRORS, **KICK_ERRORS}
+
 DISK_FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
 DISK_FULL_MARKERS = ("no space left on device", "disk quota exceeded")
 
@@ -40,7 +49,7 @@ def safe_processing_error(error: Exception) -> str:
     if type(error).__name__ == "VisualPlanningUnsupportedError":
         return "Selected planner requires a video with speech"
     if type(error).__name__ == "VideoDownloadError":
-        return TWITCH_ERRORS.get(getattr(error, "reason", None), "Video download failed")
+        return VOD_ERRORS.get(getattr(error, "reason", None), "Video download failed")
     if type(error).__name__ == "TranscriptionProviderError":
         return {
             "auth": "Transcription authentication failed",
@@ -91,7 +100,7 @@ def safe_failure_code(error: Exception) -> str:
         return "transcription.unknown"
     if type(error).__name__ == "VideoDownloadError":
         reason = getattr(error, "reason", None)
-        return f"download.{reason}" if reason in TWITCH_ERRORS else "download.failed"
+        return f"download.{reason}" if reason in VOD_ERRORS else "download.failed"
     if type(error).__name__ == "RenderingError":
         return "render.failed"
     return "pipeline.failed"
@@ -101,7 +110,7 @@ def safe_job_error_text(error: str | None) -> str | None:
     """Only expose known, fixed messages from stored job state."""
     if error is None:
         return None
-    if error in TWITCH_ERRORS.values():
+    if error in VOD_ERRORS.values():
         return error
     if error in {
         "Processing timed out", "Video download failed", "No clip-worthy moments found",
