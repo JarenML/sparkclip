@@ -30,7 +30,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "icons": "bash scripts/icon/build-icons.sh",
+    "icons": "node scripts/icon/build-icons.cjs",
     "test:bridge": "node scripts/run-bridge-tests.cjs",
     "test:release": "node --test scripts/*.test.cjs",
     "test:renderer": "node --test tests/renderer-state.test.cjs tests/create-form.test.cjs tests/opus-clip.test.cjs",
@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-ts": "^3.0.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.3.0",

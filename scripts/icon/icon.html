@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BridgeClip app icon</title>
+    <title>SparkClip app icon</title>
     <style>
       * { box-sizing: border-box; }
       body { margin: 0; padding: 48px; background: #09090b; color: #fafafa; font: 15px system-ui, sans-serif; }
@@ -20,9 +20,9 @@
   </head>
   <body>
     <main>
-      <h1>BridgeClip app icon</h1>
+      <h1>SparkClip app icon</h1>
       <p>A clip/play emblem in BridgeMind gold and cyan. Imagegen master, with transparent outer padding.</p>
-      <img class="hero" src="../../resources/bridgeclip-icon.png" alt="BridgeClip app icon" />
+      <img class="hero" src="../../resources/sparkclip-icon.svg" alt="SparkClip app icon" />
       <div class="sizes" aria-label="Icon sizes on a dark surface"></div>
       <div class="sizes light" aria-label="Icon sizes on a light surface"></div>
     </main>
@@ -31,9 +31,9 @@
         for (const size of [16, 24, 32, 48, 64, 128]) {
           const figure = document.createElement('figure')
           const img = document.createElement('img')
-          img.src = size <= 64 ? '../../resources/bridgeclip-icon-small.svg' : '../../resources/bridgeclip-icon.svg'
+          img.src = '../../resources/sparkclip-icon.svg'
           img.width = img.height = size
-          img.alt = `BridgeClip at ${size} pixels`
+          img.alt = `SparkClip at ${size} pixels`
           const caption = document.createElement('figcaption')
           caption.textContent = `${size}px`
           figure.append(img, caption)

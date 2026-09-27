@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="resources/bridgeclip-logo.svg" />
-    <img src="resources/bridgeclip-logo-light.svg" alt="SparkClip" height="56" />
+    <source media="(prefers-color-scheme: dark)" srcset="resources/sparkclip-logo.svg" />
+    <img src="resources/sparkclip-logo-light.svg" alt="SparkClip" height="56" />
   </picture>
 </p>
 
@@ -121,7 +121,7 @@ Private release workflows package the in-repo engine and media tools for macOS, 
 | `npm run test:main` | Check desktop security and pipeline regressions |
 | `npm run test:zernio` | Check social account, upload and posting flows against local mocks |
 | `npm run dist:mac` | Package the current Mac architecture into `dist/` after preparing matching resources (signing needs a Developer ID) |
-| `npm run icons` | Export app icons from the imagegen master `resources/bridgeclip-icon.png` (macOS; see `scripts/icon/README.md`) |
+| `npm run icons` | Export app icons from the vector master `resources/sparkclip-icon.svg` (see `scripts/icon/README.md`) |
 
 ### Project layout
 

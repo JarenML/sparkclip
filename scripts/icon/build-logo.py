@@ -1,15 +1,12 @@
-"""Builds the BridgeClip logo lockup: the BridgeMind mark beside the wordmark,
+"""Builds the SparkClip logo lockup: the SparkClip mark beside the wordmark,
 with the wordmark set in Geist SemiBold and converted to outlines, so the SVGs
 render the same everywhere without the font installed.
 
-  resources/bridgeclip-logo.svg        for dark backgrounds
-  resources/bridgeclip-logo-light.svg  for light backgrounds
-
-"Bridge" is drawn at half opacity and the product name at full, so the family
-name recedes and the product reads first.
+  resources/sparkclip-logo.svg        for dark backgrounds
+  resources/sparkclip-logo-light.svg  for light backgrounds
 
 Needs: pip install fonttools brotli uharfbuzz
-Usage: python3 scripts/icon/build-logo.py [prefix] [product]   (default: Bridge Clip)
+Usage: python3 scripts/icon/build-logo.py [prefix] [product]   (default: Spark Clip)
 """
 import io
 import re
@@ -24,7 +21,7 @@ from fontTools.varLib import instancer
 
 ROOT = Path(__file__).resolve().parents[2]
 FONT = ROOT / 'src/renderer/assets/fonts/Geist-Variable.woff2'
-MARK = ROOT / 'resources/bridgemind-mark.svg'
+MARK = ROOT / 'resources/sparkclip-mark.svg'
 
 WEIGHT = 600
 TRACKING = -18  # font units (1000 per em): slightly tight, for display size
@@ -32,12 +29,13 @@ TRACKING = -18  # font units (1000 per em): slightly tight, for display size
 # Lockup geometry in a 100-unit-tall box: mark 100 tall, capitals 50 tall and
 # vertically centred on the mark, 28 units between mark and wordmark.
 MARK_H = 100
-MARK_W = MARK_H * 142.29 / 129
+_, _, MARK_VB_W, MARK_VB_H = map(float, re.search(r'viewBox="([^"]+)"', MARK.read_text()).group(1).split())
+MARK_W = MARK_H * MARK_VB_W / MARK_VB_H
 GAP = 28
 CAP_H = 50
 BASELINE = 75
 
-COLORS = {'bridgeclip-logo.svg': '#fafafa', 'bridgeclip-logo-light.svg': '#09090b'}
+COLORS = {'sparkclip-logo.svg': '#fafafa', 'sparkclip-logo-light.svg': '#09090b'}
 
 
 def outline(parts):
@@ -74,24 +72,26 @@ def outline(parts):
 
 
 def main():
-    parts = sys.argv[1:3] if len(sys.argv) >= 3 else ['Bridge', 'Clip']
+    parts = sys.argv[1:3] if len(sys.argv) >= 3 else ['Spark', 'Clip']
     (prefix_d, product_d), text_width, cap_height = outline(parts)
     scale = CAP_H / cap_height
     text_x = MARK_W + GAP
     width = text_x + text_width * scale
 
     mark_src = MARK.read_text()
+    mark_viewbox = re.search(r'viewBox="([^"]+)"', mark_src).group(1)
     mark_inner = re.sub(r'^[\s\S]*?<svg[^>]*>', '', mark_src)
+    mark_inner = re.sub(r'<title>[^<]*</title>', '', mark_inner)
     mark_inner = re.sub(r'</svg>\s*$', '', mark_inner).strip()
 
     for filename, color in COLORS.items():
         svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.2f} {MARK_H}" role="img" aria-label="{''.join(parts)}">
   <title>{''.join(parts)}</title>
-  <svg width="{MARK_W:.2f}" height="{MARK_H}" viewBox="0 0 142.29 129">
+  <svg width="{MARK_W:.2f}" height="{MARK_H}" viewBox="{mark_viewbox}">
     {mark_inner}
   </svg>
   <g transform="translate({text_x:.2f} {BASELINE}) scale({scale:.6f})" fill="{color}">
-    <path fill-opacity="0.5" d="{prefix_d}"/>
+    <path d="{prefix_d}"/>
     <path d="{product_d}"/>
   </g>
 </svg>
