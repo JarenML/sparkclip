@@ -33,6 +33,8 @@ export interface ClipDraft {
   maxClips: number
   includeCaptions: boolean
   captionPreset: string
+  /** Language for clip titles; 'auto' follows the video. */
+  titleLanguage: string
   trimOpen: boolean
   trimStart: string
   trimEnd: string
@@ -65,6 +67,7 @@ export const useDraftStore = create<DraftState>((set) => ({
   maxClips: 5,
   includeCaptions: true,
   captionPreset: 'pop',
+  titleLanguage: 'auto',
   trimOpen: false,
   trimStart: '',
   trimEnd: '',

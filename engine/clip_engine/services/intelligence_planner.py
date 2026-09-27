@@ -99,6 +99,25 @@ DEFAULT_PRICING = {"input": 2.00e-6, "output": 12.0e-6}
 # virality_score is computed from these rather than trusting model arithmetic.
 RUBRIC_DIMENSIONS = ("hook", "standalone", "arc", "quotability", "ending")
 
+# Languages clip titles can be written in (mirrors TITLE_LANGUAGES in
+# src/shared/job-contract.ts). "auto" writes them in the spoken language.
+TITLE_LANGUAGE_NAMES = {
+    "en": "English", "es": "Spanish", "pt": "Portuguese", "fr": "French", "de": "German",
+    "it": "Italian", "nl": "Dutch", "pl": "Polish", "tr": "Turkish", "ru": "Russian",
+    "ar": "Arabic", "hi": "Hindi", "ja": "Japanese", "ko": "Korean", "zh": "Chinese",
+}
+
+
+def spoken_language_name(value: Optional[str]) -> Optional[str]:
+    """A readable name for a transcription language ("es", "spanish" or "es-MX"), if it looks valid."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lower()
+    base = value.split("-")[0].split("_")[0]
+    if base in TITLE_LANGUAGE_NAMES:
+        return TITLE_LANGUAGE_NAMES[base]
+    return value.capitalize() if re.fullmatch(r"[a-z]{3,20}", value) else None
+
 CLIP_PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -381,6 +400,7 @@ class IntelligencePlannerService:
         start_time_seconds: Optional[float] = None,
         end_time_seconds: Optional[float] = None,
         aspect_ratio: str = "9:16",
+        title_language: str = "auto",
     ) -> ClipPlanResponse:
         """
         Plan viral clips from video content.
@@ -398,6 +418,7 @@ class IntelligencePlannerService:
             start_time_seconds: Optional start of processing range (clips only from this point)
             end_time_seconds: Optional end of processing range (clips only until this point)
             aspect_ratio: Output aspect ratio; long 16:9 clips are planned as longform edits
+            title_language: Language code for titles, descriptions and tags, or "auto" for the spoken language
 
         Returns:
             ClipPlanResponse with identified clips
@@ -512,6 +533,8 @@ class IntelligencePlannerService:
         self._current_max_duration = max_duration_seconds
         self._current_duration_ranges = duration_ranges
         self._current_transcript = transcript
+        self._current_title_language = title_language
+        self._current_spoken_language = getattr(transcript_result, "language", None) if transcript_result else None
         metadata_duration = getattr(video_metadata, "duration_seconds", None)
         self._current_video_duration = float(metadata_duration) if metadata_duration is not None else None
         
@@ -740,6 +763,7 @@ Rules:
 - NEVER use generic titles: "Great Advice", "Important Point", "Good Tip", "Interesting Thought"
 - Each title across all clips must be unique — no repeated words or patterns
 - Think: would this title make someone stop scrolling on TikTok?
+- LANGUAGE: {self._title_language_rule()}
 
 ## CAPTION EMPHASIS
 
@@ -824,6 +848,7 @@ Score each episode 0-10 on these keys (be calibrated; reserve 8-10 for exception
 - "summary": a 2-7 word YouTube title that promises exactly what the episode delivers. Curiosity is good; clickbait the episode doesn't pay off is not. Match the speaker's tone. Each title unique.
 - "description": 2-4 plain sentences describing what the viewer will learn or see, for the upload description.
 - "tags": 3-8 topical keywords.
+- Language: {self._title_language_rule()}
 - "emphasis": 2-5 single key words spoken in the episode (names, numbers, key terms).
 
 ## OUTPUT
@@ -852,7 +877,26 @@ the timestamps of the sample frames. Prefer intervals with multiple relevant fra
 Each clip needs start_time and end_time in seconds, a factual 2-7 word summary, tags,
 an empty emphasis array, and scores with hook, standalone, arc, quotability, and ending
 values from 0 to 10. Treat quotability as shareability of the visible moment, not speech.
-Do not overlap clips by more than 5 seconds."""
+Do not overlap clips by more than 5 seconds.
+{self._title_language_rule(visual_only=True)}"""
+
+    def _title_language_rule(self, visual_only: bool = False) -> str:
+        """The prompt line that sets the language of titles, descriptions and tags."""
+        chosen = TITLE_LANGUAGE_NAMES.get(getattr(self, "_current_title_language", "auto"))
+        if chosen:
+            return (
+                f'Write every "summary" title, description and tag in {chosen}, even when the speaker uses '
+                f"another language. They must read naturally in {chosen}, not as a word-for-word translation. "
+                'The "emphasis" words are never translated: they stay exactly as spoken.'
+            )
+        if visual_only:
+            return 'Write every "summary" title and tag in English.'
+        spoken = spoken_language_name(getattr(self, "_current_spoken_language", None))
+        language = f"the language the speaker uses ({spoken})" if spoken else "the language the speaker uses in the transcript"
+        return (
+            f'Write every "summary" title, description and tag in {language}. '
+            "Do not translate them into English unless the speaker speaks English."
+        )
 
     def _build_transcript_text(self, transcript: list) -> str:
         """Build formatted transcript text: `[start - end] (speaker) text (events)`."""

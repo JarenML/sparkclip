@@ -16,6 +16,7 @@ from clip_engine.services.intelligence_planner import (
     ClipPlanSegment,
     IntelligencePlannerService,
     IntelligencePlanningError,
+    spoken_language_name,
 )
 from clip_engine.services.transcription_service import (
     TranscriptSegment,
@@ -309,3 +310,39 @@ class TestPlanClips:
         ])
         assert result.api_costs.attempts == 2
         assert result.api_costs.estimated_cost_usd == 0.03
+
+
+class TestTitleLanguage:
+    def prompts(self, title_language="auto", spoken=None):
+        planner = make_planner()
+        planner._current_title_language = title_language
+        planner._current_spoken_language = spoken
+        return (
+            planner._build_system_prompt(5, 15, 60),
+            planner._build_longform_system_prompt(3, 300, 900),
+            planner._build_visual_only_system_prompt(5, 15, 60, None),
+        )
+
+    def test_auto_uses_the_detected_spoken_language(self):
+        short, longform, visual = self.prompts(spoken="es")
+        for prompt in (short, longform):
+            assert "in the language the speaker uses (Spanish)" in prompt
+            assert "Do not translate them into English" in prompt
+        assert 'Write every "summary" title and tag in English.' in visual
+
+    def test_auto_without_a_detected_language_follows_the_transcript(self):
+        short, _, _ = self.prompts(spoken=None)
+        assert "in the language the speaker uses in the transcript" in short
+
+    def test_a_chosen_language_overrides_the_spoken_one(self):
+        for prompt in self.prompts(title_language="en", spoken="es"):
+            assert 'title, description and tag in English, even when the speaker uses another language' in prompt
+            assert '"emphasis" words are never translated' in prompt
+        assert "in Japanese" in self.prompts(title_language="ja")[0]
+
+    def test_unknown_codes_fall_back_to_auto(self):
+        assert "the language the speaker uses" in self.prompts(title_language="xx", spoken="en")[0]
+
+    @pytest.mark.parametrize("value, name", [("es", "Spanish"), ("es-MX", "Spanish"), ("PT_br", "Portuguese"), ("spanish", "Spanish"), ("catalan", "Catalan"), ("", None), (None, None), ("x1", None), ("a" * 30, None)])
+    def test_spoken_language_names(self, value, name):
+        assert spoken_language_name(value) == name

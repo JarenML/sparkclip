@@ -235,6 +235,8 @@ test('job validation rejects malformed options and invalid trim intervals', () =
     assert.throws(() => validateJobConfig({ ...advanced, ...patch }))
   }
   for (const option of jobContract.DURATION_OPTIONS) assert.doesNotThrow(() => validateJobConfig({ ...job, durationRanges: [option.id] }))
+  for (const language of jobContract.TITLE_LANGUAGES) assert.doesNotThrow(() => validateJobConfig({ ...job, titleLanguage: language.code }))
+  for (const titleLanguage of ['xx', 'Spanish', '', null, 1]) assert.throws(() => validateJobConfig({ ...job, titleLanguage }), /title language/)
   assert.equal(validateJobConfig({ ...job, videoUrl: 'https://go.twitch.tv/videos/123?t=30s' }).videoUrl, 'https://www.twitch.tv/videos/123')
   for (const videoUrl of ['https://twitch.tv/channel', 'https://clips.twitch.tv/Clip']) assert.throws(() => validateJobConfig({ ...job, videoUrl }), /completed Twitch VOD/)
   assert.equal(validateJobConfig({ ...job, videoUrl: 'https://www.kick.com/ElZeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c?t=30' }).videoUrl, 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c')
@@ -533,6 +535,7 @@ test('pipeline preserves split JSON messages and protects the job identity', asy
   }, window, undefined, '/tmp/queued-output')
   const forwarded = JSON.parse(workerInput)
   assert.equal(forwarded.video_speed, 1.5)
+  assert.equal(forwarded.title_language, 'auto')
   assert.equal(forwarded.contract_version, 2)
   assert.equal(forwarded.output_dir, '/tmp/queued-output')
   assert.equal(forwarded.clipping_mode, 'advanced')

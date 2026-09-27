@@ -106,6 +106,8 @@ class ClippingJobRequest:
     # "tight" cuts dead air and filler words; "natural" keeps original timing.
     pacing: str = "tight"
     video_speed: float = 1.0
+    # Language code for clip titles, or "auto" for the language spoken in the video.
+    title_language: str = "auto"
 
     def __post_init__(self):
         validate_video_speed(self.video_speed)
@@ -335,6 +337,7 @@ class AIClippingPipeline:
                 start_time_seconds=request.start_time_seconds,
                 end_time_seconds=request.end_time_seconds,
                 aspect_ratio=request.aspect_ratio,
+                title_language=request.title_language,
             )
             stage_timings["planning"] = time.perf_counter() - stage_start
             logger.info(f"Planned {len(clip_plan.segments)} clips")
@@ -653,6 +656,7 @@ class AIClippingPipeline:
                     "layout_style": request.layout_style,
                     "layout_vision_enabled": self.settings.layout_vision_enabled,
                     "pacing": request.pacing,
+                    "title_language": request.title_language,
                     "video_speed": request.video_speed,
                 },
                 "transcription_status": transcription_status,

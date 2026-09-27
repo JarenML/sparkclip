@@ -2,7 +2,7 @@ import { normalizeVideoSource, vodSourceError } from '../shared/video-source'
 import { isAbsolute } from 'path'
 import type { ClipJobConfig } from './pipeline-runner'
 import { isWebUrl } from './security'
-import { DURATION_IDS, isVideoSpeed } from '../shared/job-contract'
+import { DURATION_IDS, isTitleLanguage, isVideoSpeed } from '../shared/job-contract'
 import { isModelId } from '../shared/openrouter-models'
 
 export function validateJobConfig(value: unknown): ClipJobConfig {
@@ -14,6 +14,7 @@ export function validateJobConfig(value: unknown): ClipJobConfig {
   if (typeof v.autoClipCount !== 'boolean' || typeof v.includeCaptions !== 'boolean') throw new Error('Invalid job options')
   if (typeof v.layoutVision !== 'boolean') throw new Error('Invalid vision option')
   if (v.videoSpeed !== undefined && !isVideoSpeed(v.videoSpeed)) throw new Error('Video speed must be between 1× and 2×')
+  if (v.titleLanguage !== undefined && !isTitleLanguage(v.titleLanguage)) throw new Error('Invalid title language')
   if (v.clippingMode !== undefined && !['quality', 'economy', 'advanced'].includes(v.clippingMode)) throw new Error('Invalid clipping mode')
   if (v.clippingMode === 'advanced' && (!isModelId(v.plannerModel) || !isModelId(v.transcriptionModel))) throw new Error('Choose both models in Advanced mode')
   if (v.clippingMode !== 'advanced' && (v.plannerModel !== undefined || v.transcriptionModel !== undefined)) throw new Error('Custom models require Advanced mode')
