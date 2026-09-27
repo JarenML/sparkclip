@@ -12,6 +12,7 @@ const bundled = buildSync({
       export { useSettingsStore } from './src/renderer/store/use-settings-store';
       export { useDraftStore } from './src/renderer/store/use-draft-store';
       export { SourcePicker, isValidSourceLink } from './src/renderer/components/SourcePicker';
+      export { TrimTimeline } from './src/renderer/components/TrimTimeline';
       export { framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
       export { parseJobOutput } from './src/shared/job-output';
       export { twitchVodId, kickVod, normalizeVideoSource } from './src/shared/video-source';`,
@@ -201,4 +202,19 @@ test('Kick VOD links canonicalize while other Kick pages are rejected', () => {
   assert.match(html, /Kick VOD/)
   assert.match(html, /Public, completed videos only/)
   assert.doesNotMatch(html, /<img/)
+})
+
+test('the trim timeline shows both handles over the source length and open bounds at the edges', () => {
+  const { TrimTimeline } = form.exports
+  const render = (props) => renderToStaticMarkup(React.createElement(TrimTimeline, { duration: 3600, onChange() {}, ...props }))
+  const open = render({ start: null, end: null })
+  assert.match(open, /aria-label="Trim start"[^>]*aria-valuenow="0"/)
+  assert.match(open, /aria-label="Trim end"[^>]*aria-valuenow="3600"/)
+  assert.match(open, /1:00:00 selected/)
+  const range = render({ start: 90, end: 600 })
+  assert.match(range, /aria-valuetext="1:30"/)
+  assert.match(range, /aria-valuetext="10:00"/)
+  assert.match(range, /8:30 selected/)
+  // Out-of-range typed values are clamped to the source.
+  assert.match(render({ start: 5000, end: 9000 }), /aria-label="Trim start"[^>]*aria-valuenow="3599"/)
 })
