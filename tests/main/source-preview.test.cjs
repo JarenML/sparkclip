@@ -97,3 +97,21 @@ test('unsupported sources and failed requests give no preview, and failures are 
   assert.equal((await getSourcePreview(fetchImpl, KICK_URL)).title, 'Back')
   assert.equal(calls.length, 2)
 })
+
+test('current Kick links (UUIDv7) are found in the channel listing by their start time', async () => {
+  const { getSourcePreview, uuidv7Millis } = load()
+  const id = '01a0cc51-9208-7921-86fc-339cdd02ceb3'
+  assert.equal(uuidv7Millis(id), Date.parse('2026-09-23T03:31:33Z'))
+  assert.equal(uuidv7Millis(KICK_ID), null)
+  const { fetchImpl, calls } = fakeFetch({
+    'https://kick.com/api/v2/channels/sachauzumaki/videos': () => json([
+      { start_time: '2026-09-26 02:46:43', session_title: 'Other', duration: 1000 },
+      { start_time: '2026-09-23 03:31:33', session_title: 'Minecraft', duration: 10265000, thumbnail: { src: 'https://images.kick.com/video_thumbnails/a/b/720.webp' } }
+    ]),
+    'https://images.kick.com/': () => image(Buffer.from('RIFF'), 'image/webp')
+  })
+  const preview = await getSourcePreview(fetchImpl, `https://kick.com/sachauzumaki/videos/${id}`)
+  assert.deepEqual([preview.title, preview.channel, preview.durationSeconds], ['Minecraft', 'sachauzumaki', 10265])
+  assert.match(preview.thumbnail, /^data:image\/webp;base64,/)
+  assert.equal(calls.some((call) => call.url.includes('/api/v1/video/')), false)
+})

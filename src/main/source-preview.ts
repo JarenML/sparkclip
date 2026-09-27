@@ -117,15 +117,46 @@ function field(value: unknown, ...path: string[]): unknown {
   return current
 }
 
-async function kickPreview(fetchImpl: FetchLike, id: string): Promise<SourcePreviewInfo> {
-  const data = await getJson(fetchImpl, `https://kick.com/api/v1/video/${id}`)
-  const stream = field(data, 'livestream')
+/** Milliseconds since the epoch encoded in a UUIDv7, or null for other versions. */
+export function uuidv7Millis(id: string): number | null {
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id) || id[14] !== '7') return null
+  return parseInt(id.replace(/-/g, '').slice(0, 12), 16)
+}
+
+/** Kick's "2026-09-23 03:31:33" start_time is UTC. */
+function kickStartMillis(value: unknown): number | null {
+  if (typeof value !== 'string') return null
+  const ms = Date.parse(`${value.trim().replace(' ', 'T')}Z`)
+  return Number.isNaN(ms) ? null : ms
+}
+
+async function kickPreview(fetchImpl: FetchLike, channel: string, id: string): Promise<SourcePreviewInfo> {
+  // Current links carry a UUIDv7 whose prefix is the VOD's start time, which
+  // the video API doesn't know: find it in the channel's recent VODs instead.
+  const startMs = uuidv7Millis(id)
+  let stream: unknown
+  if (startMs != null) {
+    const vods = await getJson(fetchImpl, `https://kick.com/api/v2/channels/${encodeURIComponent(channel)}/videos`)
+    let bestDelta = 5001
+    for (const vod of Array.isArray(vods) ? vods : []) {
+      const start = kickStartMillis(field(vod, 'start_time'))
+      if (start != null && Math.abs(start - startMs) < bestDelta) {
+        stream = vod
+        bestDelta = Math.abs(start - startMs)
+      }
+    }
+    if (!stream) throw new Error('Kick VOD not found')
+  } else {
+    stream = field(await getJson(fetchImpl, `https://kick.com/api/v1/video/${id}`), 'livestream')
+  }
+  const thumbnail = field(stream, 'thumbnail')
   return {
     title: text(field(stream, 'session_title')),
-    channel: text(field(stream, 'channel', 'slug'), 80),
+    channel: text(field(stream, 'channel', 'slug'), 80) ?? channel,
     // Kick reports milliseconds.
     durationSeconds: seconds(field(stream, 'duration'), 1000),
-    thumbnail: await fetchThumbnail(fetchImpl, field(stream, 'thumbnail'))
+    // A URL on the video API, { src } on the channel listing.
+    thumbnail: await fetchThumbnail(fetchImpl, typeof thumbnail === 'string' ? thumbnail : field(thumbnail, 'src'))
   }
 }
 
@@ -169,7 +200,7 @@ async function youtubePreview(fetchImpl: FetchLike, id: string): Promise<SourceP
 
 async function loadPreview(fetchImpl: FetchLike, source: string): Promise<SourcePreviewInfo | null> {
   const kick = kickVod(source)
-  if (kick) return kickPreview(fetchImpl, kick.id)
+  if (kick) return kickPreview(fetchImpl, kick.channel, kick.id)
   const twitch = twitchVodId(source)
   if (twitch) return twitchPreview(fetchImpl, twitch)
   const youtube = youtubeId(source)
