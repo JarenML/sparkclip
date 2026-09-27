@@ -14,7 +14,7 @@ const bundled = buildSync({
       export { SourcePicker, isValidSourceLink } from './src/renderer/components/SourcePicker';
       export { TrimTimeline } from './src/renderer/components/TrimTimeline';
       export { framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
-      export { parseJobOutput, meetsAllCriteria } from './src/shared/job-output';
+      export { parseJobOutput, starredClips } from './src/shared/job-output';
       export { ScoreBreakdown } from './src/renderer/components/ClipCard';
       export { twitchVodId, kickVod, normalizeVideoSource } from './src/shared/video-source';`,
     resolveDir: path.resolve(__dirname, '..'),
@@ -189,8 +189,8 @@ test('Twitch VOD links canonicalize while other Twitch pages are rejected', () =
   assert.doesNotMatch(html, /<img/)
 })
 
-test('per-criterion scores are kept, validated, and drive the all-criteria star', () => {
-  const { parseJobOutput, meetsAllCriteria, ScoreBreakdown } = form.exports
+test('per-criterion scores are kept and validated', () => {
+  const { parseJobOutput, ScoreBreakdown } = form.exports
   const base = { clip_index: 0, s3_url: 'file:///clip.mp4', duration_ms: 30000, start_time_ms: 0, end_time_ms: 30000, virality_score: 0.8 }
   const strong = { hook: 9, standalone: 8, arc: 7, quotability: 7.5, ending: 8 }
   const output = parseJobOutput({ clips: [
@@ -202,13 +202,20 @@ test('per-criterion scores are kept, validated, and drive the all-criteria star'
   ] })
   assert.deepEqual(output.clips[0].scores, strong)
   assert.deepEqual(output.clips.slice(2).map((clip) => clip.scores), [null, null, null])
-  assert.deepEqual(output.clips.map((clip) => meetsAllCriteria(clip.scores)), [true, false, false, false, false])
 
   const html = renderToStaticMarkup(React.createElement(ScoreBreakdown, { scores: { ...strong, ending: 3 } }))
   for (const label of ['Hook', 'Standalone', 'Arc', 'Quotable', 'Ending']) assert.match(html, new RegExp(`>${label}<`))
   assert.match(html, /text-warning">3</)
   assert.match(html, />7.5</)
   assert.match(renderToStaticMarkup(React.createElement(ScoreBreakdown, { scores: null })), /not saved for this run/)
+})
+
+test('the three highest virality scores are starred, ties going to the earlier clip', () => {
+  const { starredClips } = form.exports
+  const clips = [0.61, 0.83, 0.7, 0.83, 0.9, 0.7].map((virality_score, clip_index) => ({ clip_index, virality_score }))
+  assert.deepEqual([...starredClips(clips)].sort(), [1, 3, 4])
+  assert.deepEqual([...starredClips(clips.slice(0, 2))].sort(), [0, 1])
+  assert.equal(starredClips([]).size, 0)
 })
 
 test('Kick VOD links canonicalize while other Kick pages are rejected', () => {

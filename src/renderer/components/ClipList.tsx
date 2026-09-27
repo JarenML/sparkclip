@@ -17,6 +17,7 @@ import { Callout } from './ui/Callout'
 import { Segmented } from './ui/Segmented'
 import type { Page as AppPage } from './Sidebar'
 import { useClipViewStore } from '../store/use-clip-view-store'
+import { starredClips } from '../../shared/job-output'
 
 type Sort = 'score' | 'timeline'
 
@@ -84,6 +85,8 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
     for (const clip of output.clips) if (!best || clip.virality_score > best.virality_score) best = clip
     return best?.clip_index ?? null
   }, [output.clips])
+
+  const starred = useMemo(() => starredClips(output.clips), [output.clips])
 
   const clips = useMemo(() => {
     const list = [...output.clips]
@@ -288,6 +291,7 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
               clip={clip}
               vertical={vertical}
               topPick={clip.clip_index === topIndex && clips.length > 1}
+              starred={starred.has(clip.clip_index)}
               showScores={showScores}
               selected={selected.has(clip.clip_index)}
               selecting={selected.size > 0}
