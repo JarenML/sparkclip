@@ -4,7 +4,7 @@ import { cn, formatTimecode, isMac, localFileUrl } from '../lib/utils'
 import { getApi } from '../lib/ipc'
 import { clipFilePath, loadThumbnail } from '../lib/thumbnails'
 import type { ClipArtifact } from '../store/use-job-store'
-import { RUBRIC, RUBRIC_PASS_SCORE, STARRED_CLIP_COUNT, type ClipScores } from '../../shared/job-output'
+import { RUBRIC, RUBRIC_PASS_SCORE, STARRED_CLIP_COUNT, STREAM_TAGS, type ClipScores } from '../../shared/job-output'
 import { Checkbox } from './ui/Checkbox'
 import { Badge } from './ui/Badge'
 import { Skeleton } from './ui/Skeleton'
@@ -218,6 +218,13 @@ export function ClipCard({
           </span>
           {layout && <span title="How this clip was framed"> · {layout}</span>}
         </p>
+        {clip.stream_tags.length > 0 && (
+          <ul className="mt-1.5 flex flex-wrap gap-1" aria-label="Stream tags">
+            {clip.stream_tags.map((tag) => (
+              <li key={tag}><Badge>{STREAM_TAGS[tag]}</Badge></li>
+            ))}
+          </ul>
+        )}
         {clip.render_fallback && (
           <Badge
             tone="warning"

@@ -16,6 +16,8 @@ from clip_engine.services.intelligence_planner import (
     ClipPlanSegment,
     IntelligencePlannerService,
     IntelligencePlanningError,
+    STREAM_TAGS,
+    STREAM_TAGS_GUIDE,
     spoken_language_name,
 )
 from clip_engine.services.transcription_service import (
@@ -346,3 +348,55 @@ class TestTitleLanguage:
     @pytest.mark.parametrize("value, name", [("es", "Spanish"), ("es-MX", "Spanish"), ("PT_br", "Portuguese"), ("spanish", "Spanish"), ("catalan", "Catalan"), ("", None), (None, None), ("x1", None), ("a" * 30, None)])
     def test_spoken_language_names(self, value, name):
         assert spoken_language_name(value) == name
+
+
+class TestStreams:
+    def prompts(self):
+        planner = make_planner()
+        return (
+            planner._build_system_prompt(5, 15, 60),
+            planner._build_longform_system_prompt(3, 300, 900),
+            planner._build_visual_only_system_prompt(5, 15, 60, None),
+        )
+
+    def test_short_form_prompt_classifies_streams_and_explains_viral_patterns(self):
+        short, _, _ = self.prompts()
+        assert "- Stream (a livestream or its VOD" in short
+        assert "## STREAMS" in short
+        assert "EXTREME REACTIONS" in short and "HIGH STAKES" in short
+        assert "shouting, overlapping voices, broken sentences and stammering are not flaws" in short
+        assert '"stream_tags": [<1-2 stream labels for a Stream, otherwise none>]' in short
+
+    def test_every_prompt_explains_stream_tags(self):
+        short, longform, visual = self.prompts()
+        for prompt in (short, longform):
+            assert STREAM_TAGS_GUIDE in prompt
+            for tag in STREAM_TAGS:
+                assert f"- {tag}: " in prompt
+        assert "an empty stream_tags array" in visual
+
+    def test_schema_limits_stream_tags_to_known_labels(self):
+        item = CLIP_PLAN_SCHEMA["properties"]["clips"]["items"]
+        assert item["properties"]["stream_tags"]["items"]["enum"] == list(STREAM_TAGS)
+        assert "stream_tags" in item["required"]
+
+    @pytest.mark.parametrize("raw, tags", [
+        (["gaming", "rage"], ["gaming", "rage"]),
+        ([" Funny ", "funny", "HYPE", "fail"], ["funny", "hype"]),
+        (["podcast", 3, None, "irl"], ["irl"]),
+        ("gaming", []),
+        (None, []),
+    ])
+    def test_stream_tags_are_cleaned(self, raw, tags):
+        assert IntelligencePlannerService._stream_tags({"stream_tags": raw}) == tags
+        assert IntelligencePlannerService._stream_tags({}) == []
+
+    def test_parsed_clips_keep_their_stream_tags(self):
+        planner = make_planner()
+        planner._current_transcript = make_transcript(300).segments
+        content = json.dumps({"insights": "Stream", "clips": [
+            {**clip(10, 40), "stream_tags": ["just_chatting", "drama", "funny"]},
+            clip(100, 130),
+        ]})
+        result = planner._parse_clip_plan_response(completion(content))
+        assert [segment.stream_tags for segment in result.segments] == [["just_chatting", "drama"], []]
