@@ -123,3 +123,55 @@ def test_provider_details_are_sanitized_and_partial_removed(service, monkeypatch
         asyncio.run(service.download_video(URL, str(tmp_path)))
     assert safe_processing_error(error.value) == 'Kick VOD unavailable'
     assert not list(tmp_path.iterdir())
+
+
+V7_URL = 'https://kick.com/sachauzumaki/videos/01a0cc51-9208-7921-86fc-339cdd02ceb3'
+LEGACY_UUID = 'cf6c87e5-4ba8-4d8b-8a39-d6beaec8198e'
+
+
+def test_uuidv7_timestamp_is_the_vod_start():
+    assert module.uuidv7_millis('01a0cc51-9208-7921-86fc-339cdd02ceb3') == module.kick_start_millis('2026-09-23 03:31:33')
+    assert module.uuidv7_millis(VOD_ID) is None
+
+
+def fake_listing(monkeypatch, listing, calls):
+    import io, json
+    @contextmanager
+    def guard():
+        calls.append('guard')
+        yield
+    monkeypatch.setattr(module, 'guarded_public_connections', guard)
+    class Response(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+    def urlopen(request, timeout):
+        calls.append(request.full_url)
+        if isinstance(listing, Exception): raise listing
+        return Response(json.dumps(listing).encode())
+    monkeypatch.setattr(module.urllib.request, 'urlopen', urlopen)
+
+
+def test_current_links_resolve_to_the_video_uuid_by_start_time(service, monkeypatch):
+    calls = []
+    fake_listing(monkeypatch, [
+        {'start_time': '2026-09-26 02:46:43', 'video': {'uuid': 'ac919350-ce36-4caa-9d02-121e8f70db4e'}},
+        {'start_time': '2026-09-23 03:31:34', 'video': {'uuid': LEGACY_UUID.upper()}},
+    ], calls)
+    resolved = asyncio.run(service._resolve_kick_vod(V7_URL))
+    assert resolved == f'https://kick.com/sachauzumaki/videos/{LEGACY_UUID}'
+    assert calls == ['guard', 'https://kick.com/api/v2/channels/sachauzumaki/videos']
+
+
+def test_legacy_links_are_not_resolved(service, monkeypatch):
+    calls = []
+    fake_listing(monkeypatch, [], calls)
+    assert asyncio.run(service._resolve_kick_vod(URL)) == URL
+    assert calls == []
+
+
+@pytest.mark.parametrize('listing', [[], [{'start_time': '2026-09-23 03:40:00', 'video': {'uuid': LEGACY_UUID}}], [{'start_time': '2026-09-23 03:31:33', 'video': {'uuid': 'not-a-uuid'}}], {'error': 'x'}, RuntimeError('HTTP Error 403')])
+def test_unmatched_current_links_are_unavailable(service, monkeypatch, listing):
+    fake_listing(monkeypatch, listing, [])
+    with pytest.raises(module.VideoDownloadError) as error:
+        asyncio.run(service._resolve_kick_vod(V7_URL))
+    assert safe_failure_code(error.value) == 'download.kick_unavailable'

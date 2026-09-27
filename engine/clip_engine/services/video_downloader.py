@@ -18,9 +18,11 @@ import shutil
 import sys
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Literal, Optional
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import boto3
 import yt_dlp
@@ -96,6 +98,40 @@ def kick_vod_url(url: str) -> Optional[str]:
             or parsed.username or parsed.password or not valid_port):
         raise VideoDownloadError("Unsupported Kick source", reason="kick_unsupported")
     return f"https://kick.com/{match[1].lower()}/videos/{match[2].lower()}"
+
+
+KICK_API_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+MAX_KICK_LISTING_BYTES = 4 * 1024 * 1024
+KICK_START_TOLERANCE_MS = 5000
+UUID_PATTERN = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+
+
+def uuidv7_millis(value: str) -> Optional[int]:
+    """Milliseconds since the epoch encoded in a UUIDv7, or None for other versions."""
+    if not UUID_PATTERN.fullmatch(value) or value[14] != "7":
+        return None
+    return int(value.replace("-", "")[:12], 16)
+
+
+def kick_start_millis(value) -> Optional[int]:
+    """Kick's "2026-09-23 03:31:33" start_time is UTC."""
+    if not isinstance(value, str):
+        return None
+    try:
+        start = datetime.strptime(value.strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return int(start.timestamp() * 1000)
+
+
+def find_kick_vod_by_start(vods, start_ms: int) -> Optional[dict]:
+    """The listed VOD whose start_time matches the UUIDv7 timestamp."""
+    best, best_delta = None, KICK_START_TOLERANCE_MS + 1
+    for vod in vods if isinstance(vods, list) else []:
+        start = kick_start_millis(vod.get("start_time")) if isinstance(vod, dict) else None
+        if start is not None and abs(start - start_ms) < best_delta:
+            best, best_delta = vod, abs(start - start_ms)
+    return best
 
 
 # Saved-broadcast platforms downloaded with a single yt-dlp extractor:
@@ -366,7 +402,10 @@ class VideoDownloaderService:
             elif source_type == "s3":
                 result = await self._download_from_s3(url, output_path, s3_bucket)
             elif source_type in VOD_PLATFORMS:
-                result = await self._download_from_youtube(vod_platform(url)[1], output_path, output_dir, max_duration_seconds, source_type=source_type)
+                vod_url = vod_platform(url)[1]
+                if source_type == "kick":
+                    vod_url = await self._resolve_kick_vod(vod_url)
+                result = await self._download_from_youtube(vod_url, output_path, output_dir, max_duration_seconds, source_type=source_type)
             elif source_type == "youtube":
                 result = await self._download_from_youtube(url, output_path, output_dir, max_duration_seconds)
             else:
@@ -879,6 +918,42 @@ class VideoDownloaderService:
             )
         except (json.JSONDecodeError, KeyError, TypeError, ValueError, OverflowError) as e:
             raise VideoDownloadError("Invalid video metadata") from e
+
+    async def _resolve_kick_vod(self, url: str) -> str:
+        """Map a current Kick link to the video uuid yt-dlp's kick:vod understands.
+
+        Links on kick.com now carry a UUIDv7 whose 48-bit prefix is the VOD's
+        start time; the API behind kick:vod only knows the older video uuid.
+        List the channel's recent VODs, pick the one that started at that
+        moment, and use its video uuid. Older links pass through unchanged.
+        """
+        match = KICK_VOD_PATH.fullmatch(urlparse(url).path)
+        channel, vod_id = match[1], match[2]
+        start_ms = uuidv7_millis(vod_id)
+        if start_ms is None:
+            return url
+
+        def fetch_listing():
+            request = urllib.request.Request(
+                f"https://kick.com/api/v2/channels/{quote(channel, safe='')}/videos", headers=KICK_API_HEADERS
+            )
+            with guarded_public_connections():
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = response.read(MAX_KICK_LISTING_BYTES + 1)
+            if len(body) > MAX_KICK_LISTING_BYTES:
+                raise ValueError("Kick listing too large")
+            return json.loads(body)
+
+        try:
+            vods = await asyncio.get_event_loop().run_in_executor(None, fetch_listing)
+        except Exception as e:
+            raise VideoDownloadError("Kick VOD unavailable", reason="kick_unavailable") from e
+        vod = find_kick_vod_by_start(vods, start_ms)
+        video_uuid = vod.get("video", {}).get("uuid") if vod else None
+        if not isinstance(video_uuid, str) or not UUID_PATTERN.fullmatch(video_uuid.lower()):
+            raise VideoDownloadError("Kick VOD unavailable", reason="kick_unavailable")
+        logger.info("Resolved a current Kick link to its video id")
+        return f"https://kick.com/{channel}/videos/{video_uuid.lower()}"
 
     @staticmethod
     def _validate_vod_info(info: dict, max_duration: float, incomplete: bool = False, platform: str = "twitch"):
