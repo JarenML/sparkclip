@@ -4,7 +4,7 @@ import { cn, formatTimecode, isMac, localFileUrl } from '../lib/utils'
 import { getApi } from '../lib/ipc'
 import { clipFilePath, loadThumbnail } from '../lib/thumbnails'
 import type { ClipArtifact } from '../store/use-job-store'
-import { meetsAllCriteria, RUBRIC, RUBRIC_PASS_SCORE, type ClipScores } from '../../shared/job-output'
+import { RUBRIC, RUBRIC_PASS_SCORE, STARRED_CLIP_COUNT, type ClipScores } from '../../shared/job-output'
 import { Checkbox } from './ui/Checkbox'
 import { Badge } from './ui/Badge'
 import { Skeleton } from './ui/Skeleton'
@@ -23,6 +23,8 @@ interface ClipCardProps {
   clip: ClipArtifact
   vertical: boolean
   topPick?: boolean
+  /** One of the run's highest-scoring clips. */
+  starred?: boolean
   /** Show the per-criterion score breakdown under the card. */
   showScores?: boolean
   selected: boolean
@@ -39,6 +41,7 @@ export function ClipCard({
   clip,
   vertical,
   topPick,
+  starred,
   showScores,
   selected,
   selecting,
@@ -55,7 +58,6 @@ export function ClipCard({
   const [actionError, setActionError] = useState<string | null>(null)
   const title = clip.summary || `Clip ${clip.clip_index + 1}`
   const score = (clip.virality_score * 10).toFixed(1)
-  const allCriteria = meetsAllCriteria(clip.scores)
   const clipVertical = aspect == null ? vertical : aspect < 1
   const layout = clipVertical && Object.prototype.hasOwnProperty.call(LAYOUT_LABELS, clip.layout_type)
     ? LAYOUT_LABELS[clip.layout_type]
@@ -176,11 +178,11 @@ export function ClipCard({
               Top pick
             </span>
           )}
-          {allCriteria && (
+          {starred && (
             <span
               className="glass-chip pointer-events-auto inline-flex h-5 w-5 items-center justify-center rounded-full"
-              title={`Meets every criterion: all five scores are ${RUBRIC_PASS_SCORE} or higher`}
-              aria-label="Meets every criterion"
+              title={`One of the ${STARRED_CLIP_COUNT} highest-scoring clips in this run`}
+              aria-label={`Top ${STARRED_CLIP_COUNT} clip`}
               role="img"
             >
               <Star className="h-3 w-3 text-brand-gold" fill="currentColor" />

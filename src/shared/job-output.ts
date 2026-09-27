@@ -10,11 +10,16 @@ export const RUBRIC = [
 export type RubricKey = (typeof RUBRIC)[number]['key']
 export type ClipScores = Record<RubricKey, number>
 
-/** A clip meets every criterion when each of its scores is at least this. */
+/** Scores under this are highlighted in the per-criterion breakdown. */
 export const RUBRIC_PASS_SCORE = 7
 
-export function meetsAllCriteria(scores: ClipScores | null): boolean {
-  return scores !== null && RUBRIC.every(({ key }) => scores[key] >= RUBRIC_PASS_SCORE)
+/** How many of a run's highest-scoring clips get a star. */
+export const STARRED_CLIP_COUNT = 3
+
+/** The clip_index of each starred clip: the top virality scores, ties going to the earlier clip. */
+export function starredClips(clips: readonly Pick<ClipArtifact, 'clip_index' | 'virality_score'>[]): Set<number> {
+  const ranked = [...clips].sort((a, b) => b.virality_score - a.virality_score || a.clip_index - b.clip_index)
+  return new Set(ranked.slice(0, STARRED_CLIP_COUNT).map((clip) => clip.clip_index))
 }
 
 export interface ClipArtifact {
