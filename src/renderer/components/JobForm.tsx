@@ -1,13 +1,14 @@
-import { normalizeVideoSource, twitchSourceError } from '../../shared/video-source'
-import { useEffect, useMemo, type ReactNode } from 'react'
+import { normalizeVideoSource, vodSourceError } from '../../shared/video-source'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, Clock3, ListVideo, Minus, Plus, Sparkles } from 'lucide-react'
-import { cn, MOD_KEY, parseTimecode, sourceLabel } from '../lib/utils'
+import { cn, formatTimecode, MOD_KEY, parseTimecode, sourceLabel } from '../lib/utils'
 import { useDraftStore, type ClipDraft, type WizardStep } from '../store/use-draft-store'
 import { useActiveJobs } from '../store/use-job-store'
 import type { ClipJobRequest } from '../../shared/jobs'
 import { MAX_PARALLEL_JOBS } from '../../shared/jobs'
 import { CaptionPresetPicker, CAPTION_PRESET_NAMES } from './CaptionPresetPicker'
 import { SourcePicker } from './SourcePicker'
+import { TrimTimeline } from './TrimTimeline'
 import { Panel } from './ui/Panel'
 import { Switch } from './ui/Switch'
 import { Button } from './ui/Button'
@@ -36,7 +37,7 @@ const LAYOUT_STYLES = [
 const MAX_CLIPS = 100
 
 export const WIZARD_STEPS: { id: WizardStep; label: string; title: string; description: string }[] = [
-  { id: 'video', label: 'Video', title: 'Choose a video', description: 'A local file, YouTube link or Twitch VOD link. Optionally clip only part of it.' },
+  { id: 'video', label: 'Video', title: 'Choose a video', description: 'A local file, YouTube link, or Twitch or Kick VOD link. Optionally clip only part of it.' },
   { id: 'format', label: 'Format', title: 'Format, framing and speed', description: 'Choose the look and pace of every clip in this job.' },
   { id: 'clips', label: 'Clips', title: 'Clip length and count', description: 'Pick one or more lengths, or leave them all off for any length.' },
   { id: 'captions', label: 'Captions', title: 'Captions', description: 'Word-by-word captions burned into each clip. Silent videos are clipped without them.' },
@@ -107,7 +108,7 @@ export function JobForm({ onSubmit, onViewJob, blockedReason, submitting, classN
 
   const index = WIZARD_STEPS.findIndex((s) => s.id === step)
   const meta = WIZARD_STEPS[index]
-  const sourceError = twitchSourceError(draft.source)
+  const sourceError = vodSourceError(draft.source)
   const hasSource = Boolean(draft.source.trim()) && !sourceError
   const modelsValid = draft.clippingMode !== 'advanced' || (isModelId(draft.plannerModel) && isModelId(draft.transcriptionModel))
   const stepValid = step === 'video' ? hasSource && !trim.error : step !== 'clips' || modelsValid
@@ -231,9 +232,13 @@ function Stepper({ current, reachable, onSelect }: { current: WizardStep; reacha
 }
 
 function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; update: Update; trimError: string | null; disabled?: boolean }): React.JSX.Element {
+  const [duration, setDuration] = useState<number | null>(null)
+  const typedStart = parseTimecode(draft.trimStart)
+  const typedEnd = parseTimecode(draft.trimEnd)
+  const asText = (seconds: number | null): string => (seconds == null ? '' : formatTimecode(seconds * 1000))
   return (
     <div className="space-y-3">
-      <SourcePicker value={draft.source} onChange={(source) => update({ source })} disabled={disabled} />
+      <SourcePicker value={draft.source} onChange={(source) => update({ source })} onDurationChange={setDuration} disabled={disabled} />
       <SettingRow
         title="Clip only part of the video"
         description="Set a start and end time. Leave either empty for an open range."
@@ -241,7 +246,16 @@ function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; u
       />
       {draft.trimOpen && (
         <div className="animate-fade-in">
-          <div className="grid grid-cols-2 gap-2">
+          {duration != null && (
+            <TrimTimeline
+              duration={duration}
+              start={Number.isNaN(typedStart) ? null : typedStart}
+              end={Number.isNaN(typedEnd) ? null : typedEnd}
+              onChange={(start, end) => update({ trimStart: asText(start), trimEnd: asText(end) })}
+              disabled={disabled}
+            />
+          )}
+          <div className={cn('grid grid-cols-2 gap-2', duration != null && 'mt-2')}>
             <TextInput
               mono
               placeholder="Start 0:00"
@@ -262,7 +276,7 @@ function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; u
             />
           </div>
           <p id="trim-help" role={trimError ? 'alert' : undefined} className={cn('mt-1.5 text-2xs', trimError ? 'text-danger' : 'text-ink-subtle')}>
-            {trimError ?? 'Use seconds (90) or mm:ss (1:30).'}
+            {trimError ?? (duration != null ? 'Drag the handles, or type seconds (90) or mm:ss (1:30).' : 'Use seconds (90) or mm:ss (1:30).')}
           </p>
         </div>
       )}

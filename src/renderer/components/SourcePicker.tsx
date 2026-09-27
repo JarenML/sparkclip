@@ -1,5 +1,5 @@
-import { normalizeVideoSource, twitchSourceError, twitchVodId } from '../../shared/video-source'
-import { useCallback, useRef, useState } from 'react'
+import { kickVod, normalizeVideoSource, twitchVodId, vodSourceError, type SourcePreviewInfo } from '../../shared/video-source'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileVideo, FolderOpen, Link2, UploadCloud, X, Youtube, Twitch } from 'lucide-react'
 import { basename, cn, formatTimecode, isUrl, localFileUrl, youtubeId } from '../lib/utils'
 import { getApi } from '../lib/ipc'
@@ -7,10 +7,13 @@ import { Button } from './ui/Button'
 import { TextInput } from './ui/Field'
 import { Badge } from './ui/Badge'
 import { IconTile } from './ui/IconTile'
+import { KickIcon } from './brand/KickIcon'
 
 interface SourcePickerProps {
   value: string
   onChange: (source: string) => void
+  /** The source's length in seconds once known (local file metadata or the link's preview), else null. */
+  onDurationChange?: (seconds: number | null) => void
   disabled?: boolean
 }
 
@@ -18,7 +21,7 @@ interface SourcePickerProps {
 export function isValidSourceLink(value: string): boolean {
   try {
     const url = new URL(value.trim())
-    return (url.protocol === 'https:' || url.protocol === 'http:') && Boolean(url.hostname) && !url.username && !url.password && !twitchSourceError(value)
+    return (url.protocol === 'https:' || url.protocol === 'http:') && Boolean(url.hostname) && !url.username && !url.password && !vodSourceError(value)
   } catch {
     return false
   }
@@ -33,7 +36,7 @@ function displaySourceLink(value: string): string {
   }
 }
 
-export function SourcePicker({ value, onChange, disabled }: SourcePickerProps): React.JSX.Element {
+export function SourcePicker({ value, onChange, onDurationChange, disabled }: SourcePickerProps): React.JSX.Element {
   const [pickerError, setPickerError] = useState<string | null>(null)
   const browse = useCallback(async () => {
     try {
@@ -49,7 +52,7 @@ export function SourcePicker({ value, onChange, disabled }: SourcePickerProps): 
 
   if (value) {
     return <>
-      <SourcePreview key={value} source={value} onClear={() => { setPickerError(null); onChange('') }} onReplace={browse} disabled={disabled} />
+      <SourcePreview key={value} source={value} onClear={() => { setPickerError(null); onChange('') }} onReplace={browse} onDurationChange={onDurationChange} disabled={disabled} />
       {pickerError && <p role="alert" className="mt-2.5 px-1 text-xs text-danger">{pickerError}</p>}
     </>
   }
@@ -79,7 +82,7 @@ function DropZone({
     const link = text.trim()
     if (!link) return
     if (!isValidSourceLink(link)) {
-      setError(twitchSourceError(link) ?? 'Paste a valid HTTP(S) link without a username or password.')
+      setError(vodSourceError(link) ?? 'Paste a valid HTTP(S) link without a username or password.')
       return
     }
     setError(null)
@@ -152,6 +155,7 @@ function DropZone({
           <div role="group" aria-label="Supported video links" className="mt-2 flex flex-wrap items-center gap-2">
             <Badge icon={<Youtube aria-hidden className="h-3.5 w-3.5 text-[#ff0033]" />}>YouTube</Badge>
             <Badge icon={<Twitch aria-hidden className="h-3.5 w-3.5 text-[#a970ff]" />}>Twitch VODs</Badge>
+            <Badge icon={<KickIcon aria-hidden className="h-3.5 w-3.5 text-[#53fc18]" />}>Kick VODs</Badge>
           </div>
         </div>
       </div>
@@ -161,7 +165,7 @@ function DropZone({
           inputSize="lg"
           className="min-w-0 flex-1"
           value={draft}
-          placeholder="YouTube, Twitch VOD or direct video link"
+          placeholder="YouTube, Twitch or Kick VOD, or direct video link"
           aria-label="Video link"
           leading={<Link2 className="h-4 w-4" />}
           onChange={(e) => {
@@ -173,7 +177,7 @@ function DropZone({
           disabled={disabled}
           onPaste={(e) => {
             const text = e.clipboardData.getData('text')
-            if (isValidSourceLink(text) || twitchSourceError(text)) {
+            if (isValidSourceLink(text) || vodSourceError(text)) {
               e.preventDefault()
               submitLink(text)
             }
@@ -203,19 +207,39 @@ function SourcePreview({
   source,
   onClear,
   onReplace,
+  onDurationChange,
   disabled
 }: {
   source: string
   onClear: () => void
   onReplace: () => void
+  onDurationChange?: (seconds: number | null) => void
   disabled?: boolean
 }): React.JSX.Element {
   const link = isUrl(source)
   const ytId = link ? youtubeId(source) : null
   const twitchId = link ? twitchVodId(source) : null
+  const kick = link ? kickVod(source) : null
   const displaySource = link ? displaySourceLink(source) : basename(source)
   const [durationMs, setDurationMs] = useState<number | null>(null)
   const [mediaFailed, setMediaFailed] = useState(false)
+  const [preview, setPreview] = useState<SourcePreviewInfo | null>(null)
+  const durationSeconds = durationMs != null ? durationMs / 1000 : preview?.durationSeconds ?? null
+  const thumbnail = ytId ? null : preview?.thumbnail ?? null
+  const reportDuration = useRef(onDurationChange)
+  reportDuration.current = onDurationChange
+
+  useEffect(() => {
+    if (!link) return
+    let active = true
+    getApi().source.preview(source).then((info) => { if (active) setPreview(info) }).catch(() => undefined)
+    return () => { active = false }
+  }, [link, source])
+
+  useEffect(() => {
+    reportDuration.current?.(durationSeconds)
+  }, [durationSeconds])
+  useEffect(() => () => reportDuration.current?.(null), [])
 
   return (
     <div className="glass flex items-center gap-3 rounded-2xl p-2.5 pr-3 animate-fade-in">
@@ -247,29 +271,34 @@ function SourcePreview({
             onError={() => setMediaFailed(true)}
           />
         )}
-        {(mediaFailed || (link && !ytId)) && (
+        {!mediaFailed && thumbnail && (
+          <img src={thumbnail} alt="" className="h-full w-full object-cover" onError={() => setMediaFailed(true)} draggable={false} />
+        )}
+        {(mediaFailed || (link && !ytId && !thumbnail)) && (
           <div className="flex h-full w-full items-center justify-center bg-accent/10 text-ink-subtle">
-            {twitchId ? <Twitch className="h-5 w-5" /> : link ? <Link2 className="h-5 w-5" /> : <FileVideo className="h-5 w-5" />}
+            {twitchId ? <Twitch className="h-5 w-5" /> : kick ? <KickIcon className="h-5 w-5" /> : link ? <Link2 className="h-5 w-5" /> : <FileVideo className="h-5 w-5" />}
           </div>
         )}
-        {durationMs != null && (
+        {durationSeconds != null && (
           <span className="glass-chip absolute bottom-1 right-1 rounded-full px-1.5 font-mono text-[10px] tabular text-white">
-            {formatTimecode(durationMs)}
+            {formatTimecode(durationSeconds * 1000)}
           </span>
         )}
       </div>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-base font-semibold text-ink" title={displaySource} data-selectable>
-          {displaySource}
+        <p className="truncate text-base font-semibold text-ink" title={preview?.title ?? displaySource} data-selectable>
+          {preview?.title ?? displaySource}
         </p>
         <div className="mt-1.5 flex min-w-0 items-center gap-2">
           <Badge
-            icon={twitchId ? <Twitch className="h-3 w-3" /> : ytId ? <Youtube className="h-3 w-3" /> : link ? <Link2 className="h-3 w-3" /> : <FileVideo className="h-3 w-3" />}
+            icon={twitchId ? <Twitch className="h-3 w-3" /> : kick ? <KickIcon className="h-3 w-3" /> : ytId ? <Youtube className="h-3 w-3" /> : link ? <Link2 className="h-3 w-3" /> : <FileVideo className="h-3 w-3" />}
           >
-            {twitchId ? 'Twitch VOD' : ytId ? 'YouTube' : link ? 'Link' : 'Local file'}
+            {twitchId ? 'Twitch VOD' : kick ? 'Kick VOD' : ytId ? 'YouTube' : link ? 'Link' : 'Local file'}
           </Badge>
-          <span className="truncate text-2xs text-ink-subtle">{twitchId ? 'Public, completed videos only' : 'Ready to clip'}</span>
+          <span className="truncate text-2xs text-ink-subtle">
+            {preview?.channel ? `${preview.channel} · ` : ''}{twitchId || kick ? 'Public, completed videos only' : 'Ready to clip'}
+          </span>
         </div>
       </div>
 

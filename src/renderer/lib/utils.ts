@@ -1,4 +1,4 @@
-import { twitchVodId } from '../../shared/video-source'
+import { kickVod, twitchVodId } from '../../shared/video-source'
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -95,27 +95,14 @@ export function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path
 }
 
-/** Video id for youtube.com/watch, youtu.be and /shorts links. */
-export function youtubeId(url: string): string | null {
-  try {
-    const u = new URL(url)
-    const host = u.hostname.replace(/^www\.|^m\./, '')
-    if (host === 'youtu.be') return u.pathname.slice(1) || null
-    if (host === 'youtube.com' || host === 'music.youtube.com') {
-      if (u.searchParams.get('v')) return u.searchParams.get('v')
-      const match = u.pathname.match(/^\/(shorts|live|embed)\/([^/?#]+)/)
-      return match?.[2] ?? null
-    }
-  } catch {
-    // not a URL
-  }
-  return null
-}
+export { youtubeId } from '../../shared/video-source'
 
 /** Short human label for a clip source: file name, or host + path for links. */
 export function sourceLabel(source: string): string {
   const twitchId = twitchVodId(source)
   if (twitchId) return `Twitch VOD · ${twitchId}`
+  const kick = kickVod(source)
+  if (kick) return `Kick VOD · ${kick.channel} · ${kick.id.slice(0, 8)}`
   if (!isUrl(source)) return basename(source)
   try {
     const u = new URL(source)

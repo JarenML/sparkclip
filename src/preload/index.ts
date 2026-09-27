@@ -14,6 +14,7 @@ import type { ClipJobRequest, JobSnapshot } from '../shared/jobs'
 import type { Automation, AutomationUpdate, AutomationTikTokReview, AutomationTikTokReviewUpdate } from '../shared/automations'
 import type { OpenRouterCatalog } from '../shared/openrouter-models'
 import type { UpdateState } from '../shared/updates'
+import type { SourcePreviewInfo } from '../shared/video-source'
 
 export interface ClipSettings {
   openrouterConfigured: boolean
@@ -130,6 +131,10 @@ export interface BridgeClipAPI {
   thumbnails: {
     generate: (videoPath: string, seekSeconds?: number) => Promise<string | null>
   }
+  source: {
+    /** Title, duration and thumbnail for a YouTube, Twitch or Kick link; null otherwise. */
+    preview: (source: string) => Promise<SourcePreviewInfo | null>
+  }
   shell: {
     /** Opens a local path with its default app, or an http(s) URL in the browser. */
     openPath: (path: string) => Promise<boolean>
@@ -233,6 +238,9 @@ const api: BridgeClipAPI = {
   },
   thumbnails: {
     generate: (videoPath, seekSeconds) => ipcRenderer.invoke('thumbnails:generate', videoPath, seekSeconds)
+  },
+  source: {
+    preview: (source) => ipcRenderer.invoke('source:preview', source)
   },
   shell: {
     openPath: (path) => ipcRenderer.invoke('shell:openPath', path),

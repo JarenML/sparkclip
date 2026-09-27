@@ -12,10 +12,11 @@ const bundled = buildSync({
       export { useSettingsStore } from './src/renderer/store/use-settings-store';
       export { useDraftStore } from './src/renderer/store/use-draft-store';
       export { SourcePicker, isValidSourceLink } from './src/renderer/components/SourcePicker';
+      export { TrimTimeline } from './src/renderer/components/TrimTimeline';
       export { framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
       export { parseJobOutput, meetsAllCriteria } from './src/shared/job-output';
       export { ScoreBreakdown } from './src/renderer/components/ClipCard';
-      export { twitchVodId, normalizeVideoSource } from './src/shared/video-source';`,
+      export { twitchVodId, kickVod, normalizeVideoSource } from './src/shared/video-source';`,
     resolveDir: path.resolve(__dirname, '..'),
     loader: 'ts'
   },
@@ -208,4 +209,35 @@ test('per-criterion scores are kept, validated, and drive the all-criteria star'
   assert.match(html, /text-warning">3</)
   assert.match(html, />7.5</)
   assert.match(renderToStaticMarkup(React.createElement(ScoreBreakdown, { scores: null })), /not saved for this run/)
+})
+
+test('Kick VOD links canonicalize while other Kick pages are rejected', () => {
+  const { normalizeVideoSource, kickVod, SourcePicker } = form.exports
+  const canonical = 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'
+  for (const source of ['https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c', 'https://www.kick.com/ElZeein/videos/191061C4-3C2E-46E8-83EF-ECA789C89B3C/?t=30&utm_source=x', 'https://kick.com:443/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c']) {
+    assert.equal(isValidSourceLink(source), true)
+    assert.equal(normalizeVideoSource(source), canonical)
+    assert.deepEqual(kickVod(source), { channel: 'elzeein', id: '191061c4-3c2e-46e8-83ef-eca789c89b3c' })
+  }
+  for (const source of ['https://kick.com/elzeein', 'https://kick.com/elzeein/clips/clip_01ABC', 'https://kick.com/video/191061c4-3c2e-46e8-83ef-eca789c89b3c', 'https://kick.com/elzeein/videos/nope', 'https://player.kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c', 'https://kick.com:8443/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c']) assert.equal(isValidSourceLink(source), false)
+  assert.equal(kickVod('https://kick.com.evil.test/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'), null)
+  const html = renderToStaticMarkup(React.createElement(SourcePicker, { value: canonical, onChange() {} }))
+  assert.match(html, /Kick VOD/)
+  assert.match(html, /Public, completed videos only/)
+  assert.doesNotMatch(html, /<img/)
+})
+
+test('the trim timeline shows both handles over the source length and open bounds at the edges', () => {
+  const { TrimTimeline } = form.exports
+  const render = (props) => renderToStaticMarkup(React.createElement(TrimTimeline, { duration: 3600, onChange() {}, ...props }))
+  const open = render({ start: null, end: null })
+  assert.match(open, /aria-label="Trim start"[^>]*aria-valuenow="0"/)
+  assert.match(open, /aria-label="Trim end"[^>]*aria-valuenow="3600"/)
+  assert.match(open, /1:00:00 selected/)
+  const range = render({ start: 90, end: 600 })
+  assert.match(range, /aria-valuetext="1:30"/)
+  assert.match(range, /aria-valuetext="10:00"/)
+  assert.match(range, /8:30 selected/)
+  // Out-of-range typed values are clamped to the source.
+  assert.match(render({ start: 5000, end: 9000 }), /aria-label="Trim start"[^>]*aria-valuenow="3599"/)
 })

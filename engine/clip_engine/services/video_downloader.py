@@ -1,7 +1,7 @@
 """
-Video Downloader Service - Downloads videos from YouTube, Twitch or S3.
+Video Downloader Service - Downloads videos from YouTube, Twitch, Kick or S3.
 
-Uses yt-dlp through guarded Python sockets for YouTube and Twitch and a pinned HTTP
+Uses yt-dlp through guarded Python sockets for YouTube, Twitch and Kick and a pinned HTTP
 client for direct URLs. Native network handlers and proxies are disabled for
 caller-supplied URLs so redirects cannot reach private destinations.
 """
@@ -18,9 +18,11 @@ import shutil
 import sys
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Literal, Optional
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import boto3
 import yt_dlp
@@ -78,6 +80,80 @@ def twitch_vod_url(url: str) -> Optional[str]:
     return f"https://www.twitch.tv/videos/{match[1]}"
 
 
+KICK_HOSTS = {"kick.com", "www.kick.com"}
+KICK_VOD_PATH = re.compile(r"/([A-Za-z0-9_-]+)/videos/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})/?")
+
+
+def kick_vod_url(url: str) -> Optional[str]:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if host.rstrip(".") != "kick.com" and not host.rstrip(".").endswith(".kick.com"):
+        return None
+    match = KICK_VOD_PATH.fullmatch(parsed.path)
+    try:
+        valid_port = parsed.port in {None, 443 if parsed.scheme == "https" else 80}
+    except ValueError:
+        valid_port = False
+    if (host not in KICK_HOSTS or not match or parsed.scheme not in {"http", "https"}
+            or parsed.username or parsed.password or not valid_port):
+        raise VideoDownloadError("Unsupported Kick source", reason="kick_unsupported")
+    return f"https://kick.com/{match[1].lower()}/videos/{match[2].lower()}"
+
+
+KICK_API_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+MAX_KICK_LISTING_BYTES = 4 * 1024 * 1024
+KICK_START_TOLERANCE_MS = 5000
+UUID_PATTERN = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+
+
+def uuidv7_millis(value: str) -> Optional[int]:
+    """Milliseconds since the epoch encoded in a UUIDv7, or None for other versions."""
+    if not UUID_PATTERN.fullmatch(value) or value[14] != "7":
+        return None
+    return int(value.replace("-", "")[:12], 16)
+
+
+def kick_start_millis(value) -> Optional[int]:
+    """Kick's "2026-09-23 03:31:33" start_time is UTC."""
+    if not isinstance(value, str):
+        return None
+    try:
+        start = datetime.strptime(value.strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return int(start.timestamp() * 1000)
+
+
+def find_kick_vod_by_start(vods, start_ms: int) -> Optional[dict]:
+    """The listed VOD whose start_time matches the UUIDv7 timestamp."""
+    best, best_delta = None, KICK_START_TOLERANCE_MS + 1
+    for vod in vods if isinstance(vods, list) else []:
+        start = kick_start_millis(vod.get("start_time")) if isinstance(vod, dict) else None
+        if start is not None and abs(start - start_ms) < best_delta:
+            best, best_delta = vod, abs(start - start_ms)
+    return best
+
+
+# Saved-broadcast platforms downloaded with a single yt-dlp extractor:
+# platform -> (canonical URL function, extractor, display name).
+VOD_PLATFORMS = {
+    "twitch": (twitch_vod_url, "twitch:vod", "Twitch"),
+    "kick": (kick_vod_url, "kick:vod", "Kick"),
+}
+
+
+def vod_platform(url: str) -> tuple[Optional[str], Optional[str]]:
+    """(platform, canonical VOD URL) for a supported VOD link, else (None, None).
+
+    Raises VideoDownloadError for other pages on a supported platform's domain.
+    """
+    for platform, (canonical, _, _) in VOD_PLATFORMS.items():
+        vod_url = canonical(url)
+        if vod_url:
+            return platform, vod_url
+    return None, None
+
+
 def finite_number(value, default=0):
     try:
         number = float(value)
@@ -97,7 +173,7 @@ UA_LIST = [
 
 
 # Source types for videos
-VideoSourceType = Literal["youtube", "twitch", "s3", "direct_url", "local"]
+VideoSourceType = Literal["youtube", "twitch", "kick", "s3", "direct_url", "local"]
 
 
 @dataclass
@@ -270,8 +346,9 @@ class VideoDownloaderService:
         
         parsed = urlparse(url_or_key)
         
-        if twitch_vod_url(url_or_key):
-            return "twitch"
+        platform, _ = vod_platform(url_or_key)
+        if platform:
+            return platform
 
         # S3 URL formats
         if parsed.hostname and (
@@ -324,8 +401,11 @@ class VideoDownloaderService:
                 result = await self._use_local_file(url)
             elif source_type == "s3":
                 result = await self._download_from_s3(url, output_path, s3_bucket)
-            elif source_type == "twitch":
-                result = await self._download_from_youtube(twitch_vod_url(url), output_path, output_dir, max_duration_seconds, source_type="twitch")
+            elif source_type in VOD_PLATFORMS:
+                vod_url = vod_platform(url)[1]
+                if source_type == "kick":
+                    vod_url = await self._resolve_kick_vod(vod_url)
+                result = await self._download_from_youtube(vod_url, output_path, output_dir, max_duration_seconds, source_type=source_type)
             elif source_type == "youtube":
                 result = await self._download_from_youtube(url, output_path, output_dir, max_duration_seconds)
             else:
@@ -379,7 +459,7 @@ class VideoDownloaderService:
         source_type: VideoSourceType = "youtube",
     ) -> DownloadResult:
         """
-        Download video from YouTube or Twitch using yt-dlp Python library.
+        Download video from YouTube, Twitch or Kick using yt-dlp Python library.
 
         Downloads through guarded Python sockets:
         - Uses flexible format selectors that work reliably
@@ -418,7 +498,7 @@ class VideoDownloaderService:
 
         # Highest available quality first; see YOUTUBE_FORMAT_SELECTORS.
         # CRITICAL: All selectors MUST exclude AV1 (the bundled FFmpeg can't decode it).
-        format_selectors = ["b[vcodec!^=av01]"] if source_type == "twitch" else YOUTUBE_FORMAT_SELECTORS
+        format_selectors = ["b[vcodec!^=av01]"] if source_type in VOD_PLATFORMS else YOUTUBE_FORMAT_SELECTORS
 
         # Run download in thread pool to not block event loop
         loop = asyncio.get_event_loop()
@@ -437,10 +517,10 @@ class VideoDownloaderService:
                         output_path=output_path,
                         download=True,
                     )
-                    if source_type == "twitch":
-                        ydl_opts["allowed_extractors"] = ["twitch:vod"]
+                    if source_type in VOD_PLATFORMS:
+                        ydl_opts["allowed_extractors"] = [VOD_PLATFORMS[source_type][1]]
                         ydl_opts["skip_unavailable_fragments"] = False
-                        ydl_opts["match_filter"] = lambda info, *, incomplete=False: self._validate_twitch_info(info, max_duration, incomplete)
+                        ydl_opts["match_filter"] = lambda info, *, incomplete=False: self._validate_vod_info(info, max_duration, incomplete, platform=source_type)
                     ydl_opts["format"] = format_selector
                     ydl_opts["progress_hooks"] = [check_progress]
                     ydl_opts["postprocessor_hooks"] = [check_progress]
@@ -495,8 +575,9 @@ class VideoDownloaderService:
             self._remove_partial_files(output_path)
             if isinstance(e, VideoDownloadError):
                 raise
-            if source_type == "twitch" and not is_disk_full(e):
-                raise VideoDownloadError("Twitch VOD download failed", reason="twitch_unavailable") from e
+            if source_type in VOD_PLATFORMS and not is_disk_full(e):
+                name = VOD_PLATFORMS[source_type][2]
+                raise VideoDownloadError(f"{name} VOD download failed", reason=f"{source_type}_unavailable") from e
             raise VideoDownloadError(f"Failed to download video: {e}") from e
 
         # Verify output exists
@@ -838,19 +919,60 @@ class VideoDownloaderService:
         except (json.JSONDecodeError, KeyError, TypeError, ValueError, OverflowError) as e:
             raise VideoDownloadError("Invalid video metadata") from e
 
+    async def _resolve_kick_vod(self, url: str) -> str:
+        """Map a current Kick link to the video uuid yt-dlp's kick:vod understands.
+
+        Links on kick.com now carry a UUIDv7 whose 48-bit prefix is the VOD's
+        start time; the API behind kick:vod only knows the older video uuid.
+        List the channel's recent VODs, pick the one that started at that
+        moment, and use its video uuid. Older links pass through unchanged.
+        """
+        match = KICK_VOD_PATH.fullmatch(urlparse(url).path)
+        channel, vod_id = match[1], match[2]
+        start_ms = uuidv7_millis(vod_id)
+        if start_ms is None:
+            return url
+
+        def fetch_listing():
+            request = urllib.request.Request(
+                f"https://kick.com/api/v2/channels/{quote(channel, safe='')}/videos", headers=KICK_API_HEADERS
+            )
+            with guarded_public_connections():
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = response.read(MAX_KICK_LISTING_BYTES + 1)
+            if len(body) > MAX_KICK_LISTING_BYTES:
+                raise ValueError("Kick listing too large")
+            return json.loads(body)
+
+        try:
+            vods = await asyncio.get_event_loop().run_in_executor(None, fetch_listing)
+        except Exception as e:
+            raise VideoDownloadError("Kick VOD unavailable", reason="kick_unavailable") from e
+        vod = find_kick_vod_by_start(vods, start_ms)
+        video_uuid = vod.get("video", {}).get("uuid") if vod else None
+        if not isinstance(video_uuid, str) or not UUID_PATTERN.fullmatch(video_uuid.lower()):
+            raise VideoDownloadError("Kick VOD unavailable", reason="kick_unavailable")
+        logger.info("Resolved a current Kick link to its video id")
+        return f"https://kick.com/{channel}/videos/{video_uuid.lower()}"
+
     @staticmethod
-    def _validate_twitch_info(info: dict, max_duration: float, incomplete: bool = False):
+    def _validate_vod_info(info: dict, max_duration: float, incomplete: bool = False, platform: str = "twitch"):
+        name = VOD_PLATFORMS[platform][2]
         if not isinstance(info, dict):
-            raise VideoDownloadError("Twitch VOD unavailable", reason="twitch_unavailable")
+            raise VideoDownloadError(f"{name} VOD unavailable", reason=f"{platform}_unavailable")
         # Archived broadcasts often have was_live=True and is_live=None.
         if info.get("is_live") or info.get("live_status") in {"is_live", "is_upcoming", "post_live", "processing"}:
-            raise VideoDownloadError("Twitch VOD is not completed", reason="twitch_not_completed")
+            raise VideoDownloadError(f"{name} VOD is not completed", reason=f"{platform}_not_completed")
         if incomplete:
             return None
         duration = finite_number(info.get("duration"))
         if not 0 < duration <= max_duration:
-            raise VideoDownloadError("Twitch VOD duration is invalid or too long", reason="twitch_duration")
+            raise VideoDownloadError(f"{name} VOD duration is invalid or too long", reason=f"{platform}_duration")
         return None
+
+    @classmethod
+    def _validate_twitch_info(cls, info: dict, max_duration: float, incomplete: bool = False):
+        return cls._validate_vod_info(info, max_duration, incomplete, platform="twitch")
 
     async def _get_video_info(self, url: str, deadline: Optional[float] = None) -> VideoMetadata:
         """
@@ -859,9 +981,9 @@ class VideoDownloaderService:
         Uses guarded Python sockets for metadata requests and redirects.
         """
         logger.debug("Getting video info")
-        twitch_url = twitch_vod_url(url)
-        if twitch_url:
-            url = twitch_url
+        platform, vod_url = vod_platform(url)
+        if vod_url:
+            url = vod_url
 
         # Run in thread pool to not block event loop
         loop = asyncio.get_event_loop()
@@ -881,8 +1003,8 @@ class VideoDownloaderService:
                 "no_warnings": True,
             })
 
-            if twitch_url:
-                opts["allowed_extractors"] = ["twitch:vod"]
+            if platform:
+                opts["allowed_extractors"] = [VOD_PLATFORMS[platform][1]]
             with guarded_ytdlp_children(deadline), guarded_public_connections():
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     return ydl.extract_info(url, download=False)
@@ -890,8 +1012,8 @@ class VideoDownloaderService:
         try:
             info = await loop.run_in_executor(None, do_extract)
         except Exception as e:
-            if twitch_url and not is_disk_full(e):
-                raise VideoDownloadError("Twitch VOD unavailable", reason="twitch_unavailable") from e
+            if platform and not is_disk_full(e):
+                raise VideoDownloadError(f"{VOD_PLATFORMS[platform][2]} VOD unavailable", reason=f"{platform}_unavailable") from e
             error_str = str(e)
             # Provide user-friendly error for YouTube bot detection
             if "Sign in to confirm" in error_str or "bot" in error_str.lower():
@@ -902,11 +1024,11 @@ class VideoDownloaderService:
                 )
             raise VideoDownloadError(f"Failed to get video info: {e}")
 
-        if twitch_url:
-            self._validate_twitch_info(info, self.settings.max_download_duration_seconds)
+        if platform:
+            self._validate_vod_info(info, self.settings.max_download_duration_seconds, platform=platform)
 
         return VideoMetadata(
-            source_type="twitch" if twitch_url else "youtube",
+            source_type=platform or "youtube",
             title=info.get("title", "Unknown"),
             duration_seconds=float(finite_number(info.get("duration"), 0)),
             width=int(finite_number(info.get("width"), 1920)),
