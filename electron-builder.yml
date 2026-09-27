@@ -1,7 +1,7 @@
-appId: com.bridgemind.bridgeclip
-productName: BridgeClip
-artifactName: BridgeClip-${version}-${os}-${arch}.${ext}
-copyright: Copyright © 2026 BridgeMind LLC
+appId: com.jarenml.sparkclip
+productName: SparkClip
+artifactName: SparkClip-${version}-${os}-${arch}.${ext}
+copyright: Copyright © 2026 BridgeMind LLC, JarenML
 
 # Disable production debug/code-injection entry points and validate app.asar.
 electronFuses:
@@ -110,8 +110,8 @@ nsis:
 linux:
   # Builder otherwise expands x64 as x86_64 for AppImage and amd64 for DEB.
   # Linux currently supports x64 only; keep one stable release naming contract.
-  artifactName: BridgeClip-${version}-linux-x64.${ext}
-  executableName: bridgeclip
+  artifactName: SparkClip-${version}-linux-x64.${ext}
+  executableName: sparkclip
   category: AudioVideo
   icon: build/icon.png
   target:
@@ -119,7 +119,7 @@ linux:
       arch: [x64]
     - target: deb
       arch: [x64]
-  maintainer: BridgeMind LLC <support@bridgemind.ai>
+  maintainer: JarenML
 
 deb:
   depends:
@@ -137,5 +137,5 @@ deb:
 # latest-mac.yml / latest.yml / latest-linux.yml from the published release.
 publish:
   provider: github
-  owner: bridge-mind
-  repo: bridgeclip
+  owner: JarenML
+  repo: sparkclip

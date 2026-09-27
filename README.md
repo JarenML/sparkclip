@@ -1,23 +1,23 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="resources/bridgeclip-logo.svg" />
-    <img src="resources/bridgeclip-logo-light.svg" alt="BridgeClip" height="56" />
+    <img src="resources/bridgeclip-logo-light.svg" alt="SparkClip" height="56" />
   </picture>
 </p>
 
 <h3 align="center">Turn long videos into captioned short-form clips, on your own computer.</h3>
 
 <p align="center">
-  An open-source AI clipping app from <a href="https://www.bridgemind.ai">BridgeMind</a>.
-  Drop in a podcast, stream, YouTube link or Twitch VOD link, and BridgeClip finds the strongest moments,
+  Drop in a podcast, stream, YouTube link or Twitch VOD link, and SparkClip finds the strongest moments,
   cuts them to 9:16 or 16:9, and burns in word-by-word captions.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <a href="https://github.com/bridge-mind/bridgeclip/releases"><img src="https://img.shields.io/github/v/release/bridge-mind/bridgeclip?label=download" alt="Latest release" /></a>
-  <a href="https://www.bridgemind.ai/discord"><img src="https://img.shields.io/badge/Discord-builders-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
+
+> **SparkClip is based on [BridgeClip](https://github.com/bridge-mind/bridgeclip) by [BridgeMind](https://www.bridgemind.ai)**, used under the MIT license.
+> It is an independent project, not affiliated with or endorsed by BridgeMind. Sections below that mention BridgeClip describe the shared codebase.
 
 ---
 
@@ -45,11 +45,7 @@ In **Create → Format → Video speed**, choose **1×** (normal), **1.1×**, **
 
 ## Download
 
-**macOS** (Apple silicon and Intel): download BridgeClip from [bridgeclip.ai](https://www.bridgeclip.ai) or [Releases](https://github.com/bridge-mind/bridgeclip/releases), open the disk image and drag BridgeClip to Applications. The macOS builds are signed with BridgeMind's Developer ID and notarized by Apple.
-
-**Windows x64**: download the [signed installer](https://github.com/bridge-mind/bridgeclip/releases/download/v0.1.18/BridgeClip-0.1.18-win-x64.exe) or use the Windows button on [bridgeclip.ai](https://www.bridgeclip.ai), then run the installer. The Mac and Windows downloads ship in separate releases; the site selects the newest installer for each platform. Both bundle Python, FFmpeg, and yt-dlp. **Linux** packages are coming soon; use the development setup below. See [release status and verification](docs/RELEASING.md).
-
-BridgeClip keeps itself up to date. It checks [Releases](https://github.com/bridge-mind/bridgeclip/releases) shortly after launch and every four hours, downloads a new version in the background, and installs it when you choose **Restart to update** (in the sidebar or **Settings → About**) or the next time you quit. macOS only installs an update signed by the same developer, and every download is checked against the SHA-512 published with the release. Copies run from source, local package builds and apps opened straight from the disk image don't update themselves; **Settings → About** says why. To turn updates off, start BridgeClip with `BRIDGECLIP_DISABLE_AUTO_UPDATE=1`.
+SparkClip has no published installers yet. Run it from source with the [development setup](#develop). Copies run from source don't update themselves; pull the latest code instead.
 
 On first launch, paste your OpenRouter key into the setup card:
 
@@ -80,8 +76,8 @@ Live channels, Twitch clips, collections, subscriber-only videos and deleted or 
 **Prerequisites:** Node.js 22, Python 3.12, and FFmpeg with the libass-backed `ass` filter for captions. The clipping engine, model, fonts, and locked Python dependencies are included in this repository. In development, BridgeClip uses FFmpeg from `engine-bin/` when it exists, then falls back to your `PATH`. Provider keys are needed for live jobs, not tests.
 
 ```bash
-git clone https://github.com/bridge-mind/bridgeclip
-cd bridgeclip
+git clone https://github.com/JarenML/sparkclip
+cd sparkclip
 python3.12 -m venv engine/.venv
 engine/.venv/bin/pip install --require-hashes -r engine/requirements.lock
 npm ci

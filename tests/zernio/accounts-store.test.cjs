@@ -342,7 +342,7 @@ test('a timeout checks once more, then says it stopped waiting', async () => {
   await s.state().load()
   await s.state().connect('threads')
   s.queueSync({ overview: overview([]), stale: false, error: null })
-  s.emitResult({ platform: 'threads', success: false, ended: 'timeout', error: 'BridgeClip stopped waiting for the browser after 10 minutes.' })
+  s.emitResult({ platform: 'threads', success: false, ended: 'timeout', error: 'SparkClip stopped waiting for the browser after 10 minutes.' })
   await flush(); await flush()
   assert.equal(s.state().connecting, null)
   assert.equal(s.state().notice.tone, 'neutral')

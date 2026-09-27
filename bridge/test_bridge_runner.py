@@ -197,7 +197,7 @@ class BridgeTests(unittest.TestCase):
         self.assertNotIn("secret-pass", json.dumps(fallback))
         self.assertEqual(bridge.describe_failure(None)["message"], "The clipping pipeline failed.")
         empty = bridge.describe_failure("No clip-worthy moments found (the video may have no speech, or the selected time range is too short for the chosen clip length)")
-        self.assertEqual(empty["message"], "BridgeClip couldn't find any clips in this video.")
+        self.assertEqual(empty["message"], "SparkClip couldn't find any clips in this video.")
         self.assertEqual(bridge.describe_failure("Transcription authentication failed")["message"], "OpenRouter rejected the transcription request.")
         self.assertEqual(bridge.describe_failure("Transcription account credit limit reached")["message"], "OpenRouter could not transcribe the video because the account has insufficient credit or a spending limit.")
         self.assertEqual(bridge.describe_failure("Transcription providers are temporarily rate limited")["message"], "Transcription providers are busy after automatic recovery attempts.")

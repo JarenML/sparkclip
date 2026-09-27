@@ -79,10 +79,10 @@ FAILURES = (
      "OpenRouter returned an unusable transcription response.",
      "Retry the run. If it persists, report this run so the provider response can be investigated."),
     (("audio extraction failed", "audio duration could not be determined", "transcription audio preparation failed"),
-     "BridgeClip could not prepare this video's audio for transcription.",
+     "SparkClip could not prepare this video's audio for transcription.",
      "Run Settings → System check. If the tools are ready, report this run with its failure code."),
     (("transcription audio chunk exceeded the size limit",),
-     "The transcription audio exceeded BridgeClip's size limit.",
+     "The transcription audio exceeded SparkClip's size limit.",
      "Set a shorter start and end time, or report this run so the chunk size can be adjusted."),
     (("transcription failed",),
      "Audio transcription failed.",
@@ -92,15 +92,15 @@ FAILURES = (
      "Run Settings → System check. If all tools are ready, report this run so the render can be diagnosed."),
     (("http error 403", "sign in to confirm", "blocking this request"),
      "The video service refused the download.",
-     "Update BridgeClip and retry. If it keeps happening, download the video yourself and clip it as a local file."),
+     "Update SparkClip and retry. If it keeps happening, download the video yourself and clip it as a local file."),
     (("video unavailable", "private video", "members-only", "has been removed", "not available in your country"),
      "This video is private, removed or unavailable in your region.",
      "Check the link opens in a signed-out browser window, or clip a local file instead."),
     (("exceeds maximum allowed duration",),
-     "This video is longer than BridgeClip can process.",
+     "This video is longer than SparkClip can process.",
      "Choose a shorter source video, or trim a downloaded file before adding it."),
     (("no clip-worthy moments",),
-     "BridgeClip couldn't find any clips in this video.",
+     "SparkClip couldn't find any clips in this video.",
      "No clear spoken or visual moment met the selected clip length. If you set a start and end time, widen it or pick a shorter clip length."),
     (("out of credits", "quota exceeded"),
      "Your OpenRouter key is out of credits.",
@@ -194,7 +194,7 @@ async def run(config: dict) -> bool:
 
     from clip_engine.bridge_contract import BRIDGE_CONTRACT_VERSION
     if config["contract_version"] != BRIDGE_CONTRACT_VERSION:
-        emit({"type": "error", "message": "The bundled clipping engine is incompatible with this BridgeClip version."})
+        emit({"type": "error", "message": "The bundled clipping engine is incompatible with this SparkClip version."})
         return False
 
     from clip_engine.config import get_settings, get_caption_preset

@@ -278,7 +278,7 @@ function parseConnectOptions(value: unknown): { reconnect: boolean; newProfileNa
   return { reconnect: reconnect === true, newProfileName: typeof newProfileName === 'string' ? newProfileName.trim() : null }
 }
 
-/** The workspace's default profile, or one created for BridgeClip when it has none. */
+/** The workspace's default profile, or one created for SparkClip when it has none. */
 async function ensureProfile(client: ZernioClient): Promise<string> {
   // Every Zernio workspace starts with a "Default" profile, but it can be deleted.
   const profiles = await client.listProfiles()
@@ -288,7 +288,7 @@ async function ensureProfile(client: ZernioClient): Promise<string> {
     return (await client.createProfile(APP_NAME)).id
   } catch (error) {
     if (error instanceof ZernioApiError && error.status === 403 && !error.code) {
-      throw new ZernioApiError("Your Zernio plan's profile limit is reached, so BridgeClip couldn't create a profile. Free one up in Zernio and try again.", 403, 'profile_limit')
+      throw new ZernioApiError("Your Zernio plan's profile limit is reached, so SparkClip couldn't create a profile. Free one up in Zernio and try again.", 403, 'profile_limit')
     }
     throw error
   }
@@ -452,7 +452,7 @@ export async function connectZernioAccount(
           platform,
           success: false,
           ended: 'timeout',
-          error: 'BridgeClip stopped waiting for the browser after 10 minutes. If you finished signing in, refresh; otherwise connect again.'
+          error: 'SparkClip stopped waiting for the browser after 10 minutes. If you finished signing in, refresh; otherwise connect again.'
         } satisfies ZernioConnectResult)
       }
     })
@@ -469,14 +469,14 @@ export async function connectZernioAccount(
     if (!isTrustedConnectUrl(start.authUrl, platform)) {
       const host = connectUrlHost(start.authUrl)
       logger.warn('zernio.connect.untrustedLink', { platform, host })
-      throw new ZernioApiError(`Zernio sent a sign-in link to an unexpected site (${host}), so BridgeClip didn't open it. Please report this issue.`, 502, 'untrusted_link')
+      throw new ZernioApiError(`Zernio sent a sign-in link to an unexpected site (${host}), so SparkClip didn't open it. Please report this issue.`, 502, 'untrusted_link')
     }
 
     pending = connect
     pendingCleanup = cleanupCreatedProfile
     stage = 'open_browser'
     await openInBrowser(start.authUrl).catch(() => {
-      throw new Error("BridgeClip couldn't open your web browser. Check that a default browser is set, then try again.")
+      throw new Error("SparkClip couldn't open your web browser. Check that a default browser is set, then try again.")
     })
     if (!isCurrent()) throw new Error('This sign-in was cancelled.')
     logger.info('zernio.connect.start', { platform, reconnect })
@@ -492,7 +492,7 @@ export async function connectZernioAccount(
     const retainedProfile = wasCurrent && workspaceGeneration === generation && createdProfile && !profileRemoved ? createdProfile : null
     if (retainedProfile) {
       updateCache((overview) => ({ ...overview, profiles: [...overview.profiles.filter((profile) => profile.id !== retainedProfile.id), retainedProfile] }))
-      info.message = `The profile was created, but connecting ${ZERNIO_PLATFORM_NAMES[platform]} failed. ${info.message} BridgeClip could not remove the new profile; check it in Zernio before creating another.`
+      info.message = `The profile was created, but connecting ${ZERNIO_PLATFORM_NAMES[platform]} failed. ${info.message} SparkClip could not remove the new profile; check it in Zernio before creating another.`
     }
     logger.warn('zernio.connect.failed', { traceId: client?.traceId ?? null, platform, stage, profileCreated: Boolean(createdProfile), profileRemoved, kind: info.kind, status: error instanceof ZernioApiError ? error.status : null })
     return { status: 'failed', platform, profileId: targetProfileId, error: info, ...(retainedProfile ? { createdProfile: retainedProfile } : {}) }
