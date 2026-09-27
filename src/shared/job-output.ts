@@ -1,3 +1,22 @@
+/** The five criteria the planner scores every clip on, 0-10 each. */
+export const RUBRIC = [
+  { key: 'hook', label: 'Hook', hint: 'Grabs attention in the first seconds' },
+  { key: 'standalone', label: 'Standalone', hint: 'Makes sense without the rest of the video' },
+  { key: 'arc', label: 'Arc', hint: 'Has a setup and a payoff' },
+  { key: 'quotability', label: 'Quotable', hint: 'Has a memorable, shareable line' },
+  { key: 'ending', label: 'Ending', hint: 'Ends on a strong, complete beat' }
+] as const
+
+export type RubricKey = (typeof RUBRIC)[number]['key']
+export type ClipScores = Record<RubricKey, number>
+
+/** A clip meets every criterion when each of its scores is at least this. */
+export const RUBRIC_PASS_SCORE = 7
+
+export function meetsAllCriteria(scores: ClipScores | null): boolean {
+  return scores !== null && RUBRIC.every(({ key }) => scores[key] >= RUBRIC_PASS_SCORE)
+}
+
 export interface ClipArtifact {
   clip_index: number
   s3_url: string
@@ -5,6 +24,8 @@ export interface ClipArtifact {
   start_time_ms: number
   end_time_ms: number
   virality_score: number
+  /** Per-criterion scores; null for runs made before they were saved. */
+  scores: ClipScores | null
   layout_type: string
   summary: string | null
   tags: string[]
@@ -33,6 +54,17 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
+}
+
+function clipScores(value: unknown): ClipScores | null {
+  if (!record(value)) return null
+  const scores = {} as ClipScores
+  for (const { key } of RUBRIC) {
+    const score = value[key]
+    if (!finite(score) || score < 0 || score > 10) return null
+    scores[key] = score
+  }
+  return scores
 }
 
 function boundedText(value: unknown, max: number): string | null {
@@ -165,6 +197,7 @@ export function parseJobOutput(value: unknown): JobOutput | null {
       start_time_ms: item.start_time_ms,
       end_time_ms: item.end_time_ms,
       virality_score: item.virality_score,
+      scores: clipScores(item.scores),
       layout_type: typeof item.layout_type === 'string' && ['talking_head', 'two_shot', 'screen_cam', 'screen', 'fit', 'center_crop'].includes(item.layout_type) ? item.layout_type : '',
       summary: boundedText(item.summary, 2048),
       tags: Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 50).map((tag) => tag.slice(0, 64)) : [],

@@ -13,7 +13,8 @@ const bundled = buildSync({
       export { useDraftStore } from './src/renderer/store/use-draft-store';
       export { SourcePicker, isValidSourceLink } from './src/renderer/components/SourcePicker';
       export { framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
-      export { parseJobOutput } from './src/shared/job-output';
+      export { parseJobOutput, meetsAllCriteria } from './src/shared/job-output';
+      export { ScoreBreakdown } from './src/renderer/components/ClipCard';
       export { twitchVodId, normalizeVideoSource } from './src/shared/video-source';`,
     resolveDir: path.resolve(__dirname, '..'),
     loader: 'ts'
@@ -185,4 +186,26 @@ test('Twitch VOD links canonicalize while other Twitch pages are rejected', () =
   assert.match(html, /Twitch VOD/)
   assert.match(html, /Public, completed videos only/)
   assert.doesNotMatch(html, /<img/)
+})
+
+test('per-criterion scores are kept, validated, and drive the all-criteria star', () => {
+  const { parseJobOutput, meetsAllCriteria, ScoreBreakdown } = form.exports
+  const base = { clip_index: 0, s3_url: 'file:///clip.mp4', duration_ms: 30000, start_time_ms: 0, end_time_ms: 30000, virality_score: 0.8 }
+  const strong = { hook: 9, standalone: 8, arc: 7, quotability: 7.5, ending: 8 }
+  const output = parseJobOutput({ clips: [
+    { ...base, scores: strong },
+    { ...base, clip_index: 1, scores: { ...strong, ending: 3 } },
+    { ...base, clip_index: 2, scores: { ...strong, hook: 11 } },
+    { ...base, clip_index: 3, scores: { hook: 9 } },
+    { ...base, clip_index: 4 }
+  ] })
+  assert.deepEqual(output.clips[0].scores, strong)
+  assert.deepEqual(output.clips.slice(2).map((clip) => clip.scores), [null, null, null])
+  assert.deepEqual(output.clips.map((clip) => meetsAllCriteria(clip.scores)), [true, false, false, false, false])
+
+  const html = renderToStaticMarkup(React.createElement(ScoreBreakdown, { scores: { ...strong, ending: 3 } }))
+  for (const label of ['Hook', 'Standalone', 'Arc', 'Quotable', 'Ending']) assert.match(html, new RegExp(`>${label}<`))
+  assert.match(html, /text-warning">3</)
+  assert.match(html, />7.5</)
+  assert.match(renderToStaticMarkup(React.createElement(ScoreBreakdown, { scores: null })), /not saved for this run/)
 })

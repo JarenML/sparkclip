@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clapperboard, Download, FolderOpen, ListPlus, Plus, Send } from 'lucide-react'
+import { ArrowLeft, Check, Clapperboard, Download, FolderOpen, ListChecks, ListPlus, Plus, Send } from 'lucide-react'
 import { basename, cn, errorMessage } from '../lib/utils'
 import { getApi } from '../lib/ipc'
 import { clipFilePath } from '../lib/thumbnails'
@@ -16,6 +16,7 @@ import { EmptyState } from './ui/EmptyState'
 import { Callout } from './ui/Callout'
 import { Segmented } from './ui/Segmented'
 import type { Page as AppPage } from './Sidebar'
+import { useClipViewStore } from '../store/use-clip-view-store'
 
 type Sort = 'score' | 'timeline'
 
@@ -40,6 +41,8 @@ function toPostable(clip: ClipArtifact): PostableClip {
 
 export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, onNavigate }: ClipListProps): React.JSX.Element {
   const [sort, setSort] = useState<Sort>('score')
+  const showScores = useClipViewStore((s) => s.showScores)
+  const toggleScores = useClipViewStore((s) => s.toggleScores)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [exporting, setExporting] = useState(false)
   const [posting, setPosting] = useState<PostableClip[] | null>(null)
@@ -240,6 +243,16 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
               <span aria-hidden className="mx-1 h-5 w-px bg-white/10" />
             </div>
           )}
+          <Button
+            size="sm"
+            variant={showScores ? 'secondary' : 'ghost'}
+            icon={<ListChecks className="h-3.5 w-3.5" />}
+            aria-pressed={showScores}
+            title="Show each clip's score for hook, standalone, arc, quotable and ending"
+            onClick={toggleScores}
+          >
+            Scores
+          </Button>
           <Segmented<Sort>
             label="Sort clips"
             size="sm"
@@ -275,6 +288,7 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
               clip={clip}
               vertical={vertical}
               topPick={clip.clip_index === topIndex && clips.length > 1}
+              showScores={showScores}
               selected={selected.has(clip.clip_index)}
               selecting={selected.size > 0}
               onToggleSelect={() => toggle(clip.clip_index)}
