@@ -18,6 +18,10 @@ KICK_ERRORS = {
 
 VOD_ERRORS = {**TWITCH_ERRORS, **KICK_ERRORS}
 
+# The job's start time lies after the downloaded video ends (for example past
+# the playable end of a VOD whose platform reports a longer length).
+TRIM_PAST_END = "Trim start is past the end of the video"
+
 DISK_FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
 DISK_FULL_MARKERS = ("no space left on device", "disk quota exceeded")
 
@@ -78,6 +82,8 @@ def safe_processing_error(error: Exception) -> str:
         return "Video render failed"
     if isinstance(error, RuntimeError) and str(error).startswith("No clip-worthy moments found ("):
         return "No clip-worthy moments found"
+    if isinstance(error, RuntimeError) and str(error) == TRIM_PAST_END:
+        return TRIM_PAST_END
     return "Processing failed"
 
 
@@ -103,6 +109,8 @@ def safe_failure_code(error: Exception) -> str:
         return f"download.{reason}" if reason in VOD_ERRORS else "download.failed"
     if type(error).__name__ == "RenderingError":
         return "render.failed"
+    if isinstance(error, RuntimeError) and str(error) == TRIM_PAST_END:
+        return "source.trim_past_end"
     return "pipeline.failed"
 
 
@@ -125,7 +133,7 @@ def safe_job_error_text(error: str | None) -> str | None:
         "Audio duration could not be determined", "Transcription audio preparation failed",
         "Transcription audio chunk exceeded the size limit",
         "Transcription response lacked word timestamps",
-        "Video render failed",
+        "Video render failed", TRIM_PAST_END,
     }:
         return error
     return "Processing failed"

@@ -71,6 +71,10 @@ class BridgeTests(unittest.TestCase):
         with patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()):
             self.assertTrue(asyncio.run(bridge.run(self.config(video_speed=1.5))))
         self.assertEqual(requests[-1]["video_speed"], 1.5)
+        self.assertIs(requests[-1]["save_space"], False)
+        with patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()):
+            self.assertTrue(asyncio.run(bridge.run(self.config(save_space=True))))
+        self.assertIs(requests[-1]["save_space"], True)
 
     def test_video_speed_validation(self):
         for speed in (1, 1.1, 1.25, 1.5, 1.75, 2):
@@ -78,6 +82,13 @@ class BridgeTests(unittest.TestCase):
         for speed in (None, True, "1.5", 0, 0.5, 2.01, float("nan"), float("inf")):
             with self.subTest(speed=speed), self.assertRaises(ValueError):
                 bridge.validate_config(self.config(video_speed=speed))
+
+    def test_save_space_validation(self):
+        for value in (True, False):
+            self.assertIsNotNone(bridge.validate_config(self.config(save_space=value)))
+        for value in (None, 1, "true"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                bridge.validate_config(self.config(save_space=value))
 
     def test_title_language_validation(self):
         for language in (None, "auto", "es", "en", "ja"):
@@ -205,6 +216,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(bridge.describe_failure(None)["message"], "The clipping pipeline failed.")
         empty = bridge.describe_failure("No clip-worthy moments found (the video may have no speech, or the selected time range is too short for the chosen clip length)")
         self.assertEqual(empty["message"], "SparkClip couldn't find any clips in this video.")
+        self.assertEqual(bridge.describe_failure("Trim start is past the end of the video")["message"], "The start time is after the end of the video.")
         self.assertEqual(bridge.describe_failure("Transcription authentication failed")["message"], "OpenRouter rejected the transcription request.")
         self.assertEqual(bridge.describe_failure("Transcription account credit limit reached")["message"], "OpenRouter could not transcribe the video because the account has insufficient credit or a spending limit.")
         self.assertEqual(bridge.describe_failure("Transcription providers are temporarily rate limited")["message"], "Transcription providers are busy after automatic recovery attempts.")

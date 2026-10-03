@@ -83,7 +83,16 @@ def fake_download(monkeypatch, service, fail=None, extract_error=None):
             assert active == {'network', 'children'}
             assert url == URL
             if extract_error: raise extract_error
+            if download:
+                self.download([url])
             return info
+        @staticmethod
+        def sanitize_info(value):
+            return dict(value)
+        def process_ie_result(self, result, download=False):
+            assert active == {'network', 'children'} and download
+            Path(self.options['outtmpl']).write_bytes(b'window')
+            return result
         def download(self, urls):
             assert active == {'network', 'children'}
             assert urls == [URL]
@@ -175,3 +184,59 @@ def test_unmatched_current_links_are_unavailable(service, monkeypatch, listing):
     with pytest.raises(module.VideoDownloadError) as error:
         asyncio.run(service._resolve_kick_vod(V7_URL))
     assert safe_failure_code(error.value) == 'download.kick_unavailable'
+
+
+def test_trimmed_job_downloads_only_its_section(service, monkeypatch, tmp_path):
+    fake_download(monkeypatch, service)
+    sections = []
+
+    class FakeSection(module.yt_dlp.YoutubeDL):
+        def __init__(self, options, section, **_):
+            super().__init__(options)
+            sections.append(section)
+            self.trimmed = module.HlsSection("#EXTM3U\n", start_seconds=270.0, duration_seconds=360.0, total_seconds=2224.0)
+
+    monkeypatch.setattr(module, 'SectionYoutubeDL', FakeSection)
+    result = asyncio.run(service.download_video(URL, str(tmp_path), section=(300.0, 600.0)))
+    assert sections == [(300.0, 600.0)]
+    assert (result.timeline_offset_seconds, result.source_duration_seconds) == (270.0, 2224.0)
+
+    sections.clear()
+    for section in (None, (None, None)):
+        result = asyncio.run(service.download_video(URL, str(tmp_path), section=section))
+        assert (result.timeline_offset_seconds, result.source_duration_seconds) == (0.0, None)
+    assert not sections
+
+
+def test_save_space_downloads_a_small_copy_and_keeps_its_info(service, monkeypatch, tmp_path):
+    captured = fake_download(monkeypatch, service)
+    result = asyncio.run(service.download_video(URL, str(tmp_path), save_space=True))
+    downloads = [options['format'] for options in captured if 'format' in options]
+    assert downloads == ['b[height<=480][vcodec!^=av01]']
+    assert result.vod_info['title'] == 'Saved stream'
+    plain = asyncio.run(service.download_video(URL, str(tmp_path / 'plain')))
+    assert plain.vod_info is None and captured[-1]['format'] == 'b[vcodec!^=av01]'
+
+
+def test_clip_windows_reuse_the_kept_info_at_full_quality(service, monkeypatch, tmp_path):
+    captured = fake_download(monkeypatch, service)
+    windows = []
+
+    class FakeSection(module.yt_dlp.YoutubeDL):
+        def __init__(self, options, section, pad_seconds, require_trim):
+            super().__init__(options)
+            windows.append((section, pad_seconds, require_trim))
+            self.trimmed = module.HlsSection("#EXTM3U\n", start_seconds=337.5, duration_seconds=50.0, total_seconds=2224.0)
+
+    monkeypatch.setattr(module, 'SectionYoutubeDL', FakeSection)
+    async def no_api(*_args, **_kwargs):
+        raise AssertionError('a window must not ask the platform API again')
+    monkeypatch.setattr(service, '_get_video_info', no_api)
+    monkeypatch.setattr(service, '_resolve_kick_vod', no_api)
+
+    info = {'title': 'Saved stream', 'duration': 60, 'webpage_url': URL, 'uploader': 'ElZeein'}
+    result = asyncio.run(service.download_vod_window(info, 'kick', 340.0, 370.0, str(tmp_path / 'w')))
+    assert windows == [((340.0, 370.0), module.WINDOW_PAD_SECONDS, True)]
+    assert captured[-1]['format'] == 'b[vcodec!^=av01]'
+    assert result.timeline_offset_seconds == 337.5
+    assert Path(result.video_path).read_bytes() == b'window'

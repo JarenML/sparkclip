@@ -69,13 +69,17 @@ Only download or clip material you have permission to use. Remote sites may limi
 
 Paste a public, completed Twitch video link such as `https://www.twitch.tv/videos/1234567890` into Create, then choose your clip settings and generate. BridgeClip downloads the saved video and uses the same transcription, AI moment selection and rendering flow as other sources. Links on `twitch.tv`, `www.twitch.tv`, `m.twitch.tv` and `go.twitch.tv` are accepted and normalized to the canonical video URL.
 
-Live channels, Twitch clips, collections, subscriber-only videos and deleted or expired VODs are not supported. No Twitch login or cookies are used. The original source must be at most six hours and 20 GB. BridgeClip downloads the full source before applying the optional start and end times; a link's timestamp or tracking parameters are ignored. For a longer source, trim a downloaded file before adding it. Downloads also stop after four hours or when less than 1 GB of free space would remain.
+Live channels, Twitch clips, collections, subscriber-only videos and deleted or expired VODs are not supported. No Twitch login or cookies are used. The original source must be at most six hours and 20 GB. With a start or end time set, SparkClip downloads only that part of the VOD plus 30 seconds on each side, and clip times still refer to the full VOD; without one, it downloads the whole video. A link's timestamp or tracking parameters are ignored. For a longer source, trim a downloaded file before adding it. Downloads also stop after four hours or when less than 1 GB of free space would remain.
 
 ### Clip a Kick VOD
 
 Paste a public, completed Kick video link such as `https://kick.com/channel/videos/0a1b2c3d-1234-4abc-8def-0123456789ab` into Create. Copy it from the channel's **Videos** tab. SparkClip downloads the saved video with the same flow and limits as Twitch VODs. Links on `kick.com` and `www.kick.com` are accepted and normalized to the canonical video URL.
 
 Live channels, Kick clips, subscriber-only videos and deleted VODs are not supported. No Kick login or cookies are used.
+
+### Save disk space (Twitch and Kick VODs)
+
+Turn on **Save disk space** in Create → Video to keep a VOD job small on disk. SparkClip transcribes and plans from a 480p copy, which deletes itself once the clips are chosen, then downloads each clip's own stretch at full quality, renders it and deletes it. On Kick, 480p carries the same audio as 1080p, so transcription and timing match a normal job. With it off, the full-quality video is downloaded as usual.
 
 ## Develop
 

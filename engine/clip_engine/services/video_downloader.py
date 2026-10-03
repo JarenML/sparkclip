@@ -7,6 +7,7 @@ caller-supplied URLs so redirects cannot reach private destinations.
 """
 
 import asyncio
+import copy
 import glob
 import json
 import logging
@@ -16,6 +17,7 @@ import random
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -42,6 +44,211 @@ DOWNLOAD_DEADLINE_SECONDS = 4 * 60 * 60
 MIN_FREE_BYTES = 1000 ** 3
 PROBE_TIMEOUT_SECONDS = 30
 MAX_PROBE_OUTPUT_BYTES = 1024 * 1024
+
+# A trimmed Twitch or Kick job downloads only the HLS segments covering its
+# window, plus this much on each side for sentence snapping and transcription.
+SECTION_PAD_SECONDS = 30
+MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
+# A clip window is final when it's downloaded, so it needs only a small margin
+# (it rounds out to whole segments anyway).
+WINDOW_PAD_SECONDS = 2
+# Enough of a segment's start to hold its first audio and video packets.
+SEGMENT_PROBE_BYTES = 1024 * 1024
+# Save-space jobs transcribe and plan from this variant. On Kick, 480p and up
+# carry bit-identical audio; 360p and below are more compressed.
+SAVE_SPACE_HEIGHT = 480
+# Playlist-wide tags that only appear before the first segment.
+HLS_HEADER_TAGS = (
+    "#EXTM3U", "#EXT-X-VERSION", "#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE",
+    "#EXT-X-DISCONTINUITY-SEQUENCE", "#EXT-X-PLAYLIST-TYPE", "#EXT-X-INDEPENDENT-SEGMENTS",
+    "#EXT-X-START", "#EXT-X-ALLOW-CACHE", "#EXT-X-TWITCH-", "#ID3-EQUIV-TDTG",
+)
+# Segments that depend on state set earlier in the playlist (keys, init
+# sections, byte offsets) can't be cut out of it safely.
+UNTRIMMABLE_HLS_TAGS = ("#EXT-X-KEY", "#EXT-X-SESSION-KEY", "#EXT-X-MAP", "#EXT-X-BYTERANGE", "#EXT-X-PART")
+
+
+@dataclass
+class HlsSection:
+    """A media playlist cut down to the segments around a time window."""
+
+    playlist: str
+    # Where the kept segments start and how long they last, and the whole
+    # playlist's length, in seconds on the timeline a full download produces.
+    start_seconds: float
+    duration_seconds: float
+    total_seconds: float
+    # URIs of the first kept segment and of the playlist's first segment.
+    first_uri: str = ""
+    zero_uri: str = ""
+
+
+def trim_hls_playlist(
+    text: str, start_seconds: Optional[float], end_seconds: Optional[float], pad_seconds: float = SECTION_PAD_SECONDS,
+) -> Optional[HlsSection]:
+    """Keep the segments of a finished VOD playlist that overlap the window, padded.
+
+    Times are the running sum of #EXTINF durations. That is the timeline of a
+    full download, which joins discontinuities without a gap, so a segment
+    starts at the same second in both. Returns None when the playlist can't be
+    trimmed safely or the window already covers all of it.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines or lines[0] != "#EXTM3U" or "#EXT-X-ENDLIST" not in lines:
+        return None
+    if any(line.startswith(UNTRIMMABLE_HLS_TAGS) for line in lines):
+        return None
+
+    header: list[str] = []
+    segments: list[tuple[list[str], float]] = []
+    pending: list[str] = []
+    duration: Optional[float] = None
+    for line in lines:
+        if line == "#EXT-X-ENDLIST":
+            continue
+        if line.startswith("#EXTINF:"):
+            try:
+                duration = float(line[len("#EXTINF:"):].split(",")[0])
+            except ValueError:
+                return None
+            if not math.isfinite(duration) or duration <= 0:
+                return None
+            pending.append(line)
+        elif line.startswith("#"):
+            if not segments and not pending and line.startswith(HLS_HEADER_TAGS):
+                header.append(line)
+            else:
+                pending.append(line)
+        else:
+            if duration is None:
+                return None
+            segments.append((pending + [line], duration))
+            pending, duration = [], None
+    if not segments or duration is not None:
+        return None
+
+    low = max(0.0, (start_seconds or 0.0) - pad_seconds)
+    high = math.inf if end_seconds is None else end_seconds + pad_seconds
+    kept: list[int] = []
+    elapsed = 0.0
+    starts: list[float] = []
+    for index, (_, length) in enumerate(segments):
+        starts.append(elapsed)
+        if elapsed + length > low and elapsed < high:
+            kept.append(index)
+        elapsed += length
+    if not kept or len(kept) == len(segments):
+        return None
+
+    first = kept[0]
+    out: list[str] = []
+    for line in header:
+        if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
+            try:
+                line = f"#EXT-X-MEDIA-SEQUENCE:{int(line.split(':', 1)[1]) + first}"
+            except ValueError:
+                return None
+        out.append(line)
+    for index in kept:
+        out.extend(segments[index][0])
+    out.append("#EXT-X-ENDLIST")
+    last = kept[-1]
+    return HlsSection(
+        playlist="\n".join(out) + "\n",
+        start_seconds=round(starts[first], 3),
+        duration_seconds=round(starts[last] + segments[last][1] - starts[first], 3),
+        total_seconds=round(elapsed, 3),
+        first_uri=segments[first][0][-1],
+        zero_uri=segments[0][0][-1],
+    )
+
+
+class SectionYoutubeDL(yt_dlp.YoutubeDL):
+    """Hands yt-dlp's native HLS downloader a playlist trimmed to a time window.
+
+    yt-dlp's own download_ranges switches to FFmpeg, which opens its own
+    connections and would bypass the socket guard; this keeps every request
+    on the guarded Python network stack. Anything that can't be trimmed is
+    downloaded in full, as before, unless `require_trim` is set.
+    """
+
+    def __init__(
+        self, params: dict, section: tuple[Optional[float], Optional[float]],
+        pad_seconds: float = SECTION_PAD_SECONDS, require_trim: bool = False,
+    ):
+        super().__init__(params)
+        self.section = section
+        self.pad_seconds = pad_seconds
+        self.require_trim = require_trim
+        self.trimmed: Optional[HlsSection] = None
+
+    def dl(self, name, info, subtitle=False, test=False):
+        if not subtitle and not test and info.get("protocol") in ("m3u8", "m3u8_native") \
+                and not info.get("hls_media_playlist_data"):
+            trimmed = self._trim(info)
+            if trimmed:
+                info = {**info, "hls_media_playlist_data": trimmed.playlist}
+                self.trimmed = trimmed
+        if self.require_trim and not self.trimmed:
+            raise VideoDownloadError("VOD window unavailable", reason="window_unavailable")
+        return super().dl(name, info, subtitle, test)
+
+    def _read(self, url: str, info: dict, limit: int) -> bytes:
+        request = yt_dlp.networking.Request(url, headers=info.get("http_headers") or {})
+        with self.urlopen(request) as response:
+            return response.read(limit)
+
+    def _trim(self, info: dict) -> Optional[HlsSection]:
+        try:
+            body = self._read(info["url"], info, MAX_PLAYLIST_BYTES + 1)
+            if len(body) > MAX_PLAYLIST_BYTES:
+                return None
+            trimmed = trim_hls_playlist(body.decode("utf-8", "replace"), *self.section, pad_seconds=self.pad_seconds)
+        except Exception as error:
+            logger.warning("Could not trim the VOD playlist (%s)", type(error).__name__)
+            return None
+        if not trimmed:
+            logger.info("The VOD playlist can't be trimmed to the selected range")
+            return None
+        # A file's time zero is its earliest audio or video packet, and video
+        # can start a few ms after audio. Measure that lead in the first kept
+        # segment and in the playlist's first one (a full download's zero) so
+        # the offset is exact rather than off by up to a couple of frames.
+        first = self._video_lead(urljoin(info["url"], trimmed.first_uri), info)
+        zero = first if trimmed.zero_uri == trimmed.first_uri else \
+            self._video_lead(urljoin(info["url"], trimmed.zero_uri), info)
+        if first is not None and zero is not None:
+            trimmed.start_seconds = round(trimmed.start_seconds - first + zero, 3)
+        logger.info(
+            "Downloading %.0fs of the %.0fs VOD, from %.3fs",
+            trimmed.duration_seconds, trimmed.total_seconds, trimmed.start_seconds,
+        )
+        return trimmed
+
+    def _video_lead(self, url: str, info: dict) -> Optional[float]:
+        """Seconds a segment's video starts after its earliest audio or video packet."""
+        try:
+            data = self._read(url, info, SEGMENT_PROBE_BYTES)
+            with tempfile.TemporaryDirectory(prefix="clip-probe-") as directory:
+                path = os.path.join(directory, "segment.ts")
+                with open(path, "wb") as handle:
+                    handle.write(data)
+                result = run_media(
+                    ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,start_time", "-of", "json", path],
+                    timeout=PROBE_TIMEOUT_SECONDS, max_output=MAX_PROBE_OUTPUT_BYTES, check=True,
+                )
+            starts: dict[str, float] = {}
+            for stream in json.loads(result.stdout).get("streams", []):
+                kind, value = stream.get("codec_type"), stream.get("start_time")
+                if kind in ("audio", "video") and kind not in starts and value not in (None, "N/A"):
+                    starts[kind] = float(value)
+            if "video" not in starts:
+                return None
+            lead = starts["video"] - min(starts.values())
+            return lead if 0 <= lead < 1 else None
+        except Exception as error:
+            logger.debug("Could not measure a segment's start (%s)", type(error).__name__)
+            return None
 
 # YouTube format selection. Filters only exclude AV1, which the bundled FFmpeg
 # cannot decode in software; the sort picks the best remaining stream.
@@ -202,6 +409,12 @@ class DownloadResult:
     metadata: VideoMetadata
     file_size_bytes: int
     source_type: VideoSourceType
+    # Set when only part of a VOD was downloaded: where the file starts on the
+    # full VOD's timeline, and the full VOD's length (metadata has the file's).
+    timeline_offset_seconds: float = 0.0
+    source_duration_seconds: Optional[float] = None
+    # yt-dlp's info for a VOD downloaded with keep_info, for download_vod_window.
+    vod_info: Optional[dict] = None
 
 
 class VideoDownloaderService:
@@ -373,16 +586,25 @@ class VideoDownloaderService:
         output_filename: str = "source.mp4",
         max_duration_seconds: Optional[int] = None,
         s3_bucket: Optional[str] = None,
+        section: Optional[tuple[Optional[float], Optional[float]]] = None,
+        save_space: bool = False,
     ) -> DownloadResult:
         """
         Download a video from various sources.
-        
+
         Args:
             url: Video URL (YouTube, S3, direct) or S3 key
             output_dir: Directory to save the video
             output_filename: Output filename (default: source.mp4)
             max_duration_seconds: Maximum duration to download
             s3_bucket: S3 bucket (required if url is an S3 key)
+            section: Optional (start, end) seconds the job will use. Twitch and
+                Kick VODs then download only that part (see SectionYoutubeDL);
+                the result's timeline_offset_seconds says where it starts.
+            save_space: For a Twitch or Kick VOD, download a small copy for
+                transcription and planning (SAVE_SPACE_HEIGHT, whose audio
+                matches full quality) and keep its info in vod_info, so each
+                clip's window can then come from download_vod_window.
             
         Returns:
             DownloadResult with path and metadata
@@ -405,7 +627,10 @@ class VideoDownloaderService:
                 vod_url = vod_platform(url)[1]
                 if source_type == "kick":
                     vod_url = await self._resolve_kick_vod(vod_url)
-                result = await self._download_from_youtube(vod_url, output_path, output_dir, max_duration_seconds, source_type=source_type)
+                result = await self._download_from_youtube(
+                    vod_url, output_path, output_dir, max_duration_seconds, source_type=source_type, section=section,
+                    max_height=SAVE_SPACE_HEIGHT if save_space else None, keep_info=save_space,
+                )
             elif source_type == "youtube":
                 result = await self._download_from_youtube(url, output_path, output_dir, max_duration_seconds)
             else:
@@ -457,6 +682,12 @@ class VideoDownloaderService:
         output_dir: str,
         max_duration_seconds: Optional[int] = None,
         source_type: VideoSourceType = "youtube",
+        section: Optional[tuple[Optional[float], Optional[float]]] = None,
+        max_height: Optional[int] = None,
+        keep_info: bool = False,
+        info: Optional[dict] = None,
+        pad_seconds: float = SECTION_PAD_SECONDS,
+        require_trim: bool = False,
     ) -> DownloadResult:
         """
         Download video from YouTube, Twitch or Kick using yt-dlp Python library.
@@ -464,12 +695,19 @@ class VideoDownloaderService:
         Downloads through guarded Python sockets:
         - Uses flexible format selectors that work reliably
         - Picks the highest-resolution non-AV1 stream (up to 2160p)
+
+        VODs can also be capped at `max_height`, return their yt-dlp info for
+        reuse (`keep_info`), or be downloaded again from that `info` without
+        asking the platform's API (clip windows; see download_vod_window).
         """
         deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
         # First, get video metadata to check duration.
-        metadata = await asyncio.wait_for(
-            self._get_video_info(url, deadline=deadline), timeout=DOWNLOAD_DEADLINE_SECONDS
-        )
+        if info is not None:
+            metadata = self._metadata_from_info(info, source_type)
+        else:
+            metadata = await asyncio.wait_for(
+                self._get_video_info(url, deadline=deadline), timeout=DOWNLOAD_DEADLINE_SECONDS
+            )
 
         max_duration = min(max_duration_seconds or self.settings.max_download_duration_seconds, self.settings.max_download_duration_seconds)
         if metadata.duration_seconds > max_duration:
@@ -499,12 +737,20 @@ class VideoDownloaderService:
         # Highest available quality first; see YOUTUBE_FORMAT_SELECTORS.
         # CRITICAL: All selectors MUST exclude AV1 (the bundled FFmpeg can't decode it).
         format_selectors = ["b[vcodec!^=av01]"] if source_type in VOD_PLATFORMS else YOUTUBE_FORMAT_SELECTORS
+        if max_height and source_type in VOD_PLATFORMS:
+            # Falls back to the best stream if no variant is that small.
+            format_selectors = [f"b[height<={max_height}][vcodec!^=av01]", *format_selectors]
 
         # Run download in thread pool to not block event loop
         loop = asyncio.get_event_loop()
+        if source_type not in VOD_PLATFORMS or not section or section == (None, None):
+            section = None
+        trimmed: Optional[HlsSection] = None
+        kept_info: Optional[dict] = None
 
         def do_download() -> None:
             """Try compatible formats through the guarded Python network stack."""
+            nonlocal trimmed, kept_info
             logger.info("Attempting video download")
 
             last_error = None
@@ -528,9 +774,20 @@ class VideoDownloaderService:
                     if time.monotonic() > deadline:
                         raise VideoDownloadError("Video download deadline exceeded")
 
+                    trimmed = None
                     with guarded_ytdlp_children(deadline), guarded_public_connections():
-                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                            ydl.download([url])
+                        with (
+                            SectionYoutubeDL(ydl_opts, section, pad_seconds=pad_seconds, require_trim=require_trim)
+                            if section else yt_dlp.YoutubeDL(ydl_opts)
+                        ) as ydl:
+                            if info is not None:
+                                # yt-dlp's own --load-info-json path: no new extraction.
+                                ydl.process_ie_result(ydl.sanitize_info(copy.deepcopy(info)), download=True)
+                            elif keep_info:
+                                kept_info = ydl.sanitize_info(ydl.extract_info(url, download=True))
+                            else:
+                                ydl.download([url])
+                            trimmed = getattr(ydl, "trimmed", None)
 
                     # If we get here, download succeeded
                     logger.info("Video download succeeded")
@@ -539,6 +796,10 @@ class VideoDownloaderService:
                 except VideoDownloadError:
                     raise
                 except Exception as e:
+                    # yt-dlp can wrap an error raised inside a download.
+                    cause = (getattr(e, "exc_info", None) or (None, None))[1]
+                    if isinstance(cause, VideoDownloadError):
+                        raise cause from None
                     last_error = e
                     error_str = str(e)
 
@@ -642,7 +903,33 @@ class VideoDownloaderService:
             metadata=actual_metadata,
             file_size_bytes=file_size,
             source_type=source_type,
+            timeline_offset_seconds=trimmed.start_seconds if trimmed else 0.0,
+            source_duration_seconds=trimmed.total_seconds if trimmed else None,
+            vod_info=kept_info,
         )
+
+    async def download_vod_window(
+        self, info: dict, source_type: VideoSourceType, start_seconds: float, end_seconds: float,
+        output_dir: str, output_filename: str = "window.mp4",
+    ) -> DownloadResult:
+        """Download one clip's stretch of a VOD at full quality.
+
+        `info` is the yt-dlp info kept from the job's first download, so no
+        platform API is asked again. Raises VideoDownloadError with reason
+        "window_unavailable" if the playlist can't be cut to the window; the
+        caller then falls back to the whole video.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, output_filename)
+        try:
+            return await self._download_from_youtube(
+                info.get("webpage_url") or "", output_path, output_dir, source_type=source_type,
+                section=(start_seconds, end_seconds), info=info,
+                pad_seconds=WINDOW_PAD_SECONDS, require_trim=True,
+            )
+        except Exception:
+            self._remove_partial_files(output_path)
+            raise
 
     async def _download_from_s3(
         self,
@@ -1027,8 +1314,12 @@ class VideoDownloaderService:
         if platform:
             self._validate_vod_info(info, self.settings.max_download_duration_seconds, platform=platform)
 
+        return self._metadata_from_info(info, platform or "youtube")
+
+    @staticmethod
+    def _metadata_from_info(info: dict, source_type: VideoSourceType) -> VideoMetadata:
         return VideoMetadata(
-            source_type=platform or "youtube",
+            source_type=source_type,
             title=info.get("title", "Unknown"),
             duration_seconds=float(finite_number(info.get("duration"), 0)),
             width=int(finite_number(info.get("width"), 1920)),

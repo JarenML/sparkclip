@@ -17,7 +17,7 @@ def test_local_work_directory_is_removed_after_failure_or_cancellation(monkeypat
 
     pipeline = AIClippingPipeline()
 
-    async def fail_after_download_starts(url, output_dir):
+    async def fail_after_download_starts(url, output_dir, section=None, save_space=False):
         (tmp_path / "work" / "job1" / "downloaded-source.mp4").write_bytes(b"test media")
         raise failure
 

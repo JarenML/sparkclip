@@ -1,4 +1,4 @@
-import { normalizeVideoSource, vodSourceError } from '../../shared/video-source'
+import { isStreamVod, normalizeVideoSource, vodSourceError } from '../../shared/video-source'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, Clock3, ListVideo, Minus, Plus, Sparkles } from 'lucide-react'
 import { cn, formatTimecode, MOD_KEY, parseTimecode, sourceLabel } from '../lib/utils'
@@ -76,6 +76,7 @@ export function buildJobRequest(draft: ClipDraft, trim: { start: number | null; 
     includeCaptions: draft.includeCaptions,
     captionPreset: draft.captionPreset,
     titleLanguage: draft.titleLanguage,
+    ...(draft.saveSpace && isStreamVod(draft.source) ? { saveSpace: true } : {}),
     startTimeSeconds: trim.start,
     endTimeSeconds: trim.end,
     bannerPlatform: null,
@@ -234,7 +235,8 @@ function Stepper({ current, reachable, onSelect }: { current: WizardStep; reacha
   )
 }
 
-function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; update: Update; trimError: string | null; disabled?: boolean }): React.JSX.Element {
+/** Source, trim and disk options. Exported for tests. */
+export function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; update: Update; trimError: string | null; disabled?: boolean }): React.JSX.Element {
   const [duration, setDuration] = useState<number | null>(null)
   const [seek, setSeek] = useState<SeekRequest | null>(null)
   const typedStart = parseTimecode(draft.trimStart)
@@ -284,6 +286,13 @@ function VideoStep({ draft, update, trimError, disabled }: { draft: ClipDraft; u
             {trimError ?? (duration != null ? 'Drag the handles, or type seconds (90) or mm:ss (1:30).' : 'Use seconds (90) or mm:ss (1:30).')}
           </p>
         </div>
+      )}
+      {isStreamVod(draft.source) && (
+        <SettingRow
+          title="Save disk space"
+          description="Find clips from a small 480p copy (same audio), then download only each clip in full quality."
+          control={<Switch label="Save disk space" checked={draft.saveSpace} onChange={(saveSpace) => update({ saveSpace })} />}
+        />
       )}
     </div>
   )
@@ -528,7 +537,8 @@ function CaptionsStep({ draft, update }: { draft: ClipDraft; update: Update }): 
   )
 }
 
-function ReviewStep({ draft, trim, onEdit }: {
+/** Summary of the run before Generate. Exported for tests. */
+export function ReviewStep({ draft, trim, onEdit }: {
   draft: ClipDraft
   trim: { start: number | null; end: number | null }
   onEdit: (step: WizardStep) => void
@@ -555,7 +565,9 @@ function ReviewStep({ draft, trim, onEdit }: {
     { step: 'captions', label: 'Captions', value: draft.includeCaptions ? CAPTION_PRESET_NAMES[draft.captionPreset] ?? draft.captionPreset : 'Off' },
     { step: 'captions', label: 'Titles', value: TITLE_LANGUAGES.find((language) => language.code === draft.titleLanguage)?.label ?? 'Same as the video' }
   ]
-  if (draft.clippingMode === 'advanced') rows.splice(5, 0,
+  if (draft.saveSpace && isStreamVod(draft.source)) rows.splice(1, 0,
+    { step: 'video', label: 'Disk', value: 'Save space · 480p to plan, each clip in full quality' })
+  if (draft.clippingMode === 'advanced') rows.splice(rows.findIndex((row) => row.label === 'Clips'), 0,
     { step: 'clips', label: 'Transcribe', value: draft.transcriptionModel || 'Choose a model' },
     { step: 'clips', label: 'Plan', value: draft.plannerModel || 'Choose a model' })
 

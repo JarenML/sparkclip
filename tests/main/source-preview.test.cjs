@@ -118,3 +118,43 @@ test('current Kick links (UUIDv7) are found in the channel listing by their star
   assert.equal(preview.stream.kind, 'hls')
   assert.match(preview.stream.url, /^stream-proxy:\/\/hls\//)
 })
+
+test('Kick previews use the playable length from the VOD playlist, not the broadcast length', async () => {
+  const { getSourcePreview, playlistSeconds } = load()
+  const master = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=630000,RESOLUTION=640x360\n360p/playlist.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=230000,RESOLUTION=284x160\n160p/playlist.m3u8\n'
+  // A stream restart: Kick's 2298 s counts the downtime, the segments add up to 25.4 s here.
+  const media = '#EXTM3U\n#EXT-X-TARGETDURATION:13\n#EXTINF:12.500,\n0.ts\n#EXTINF:5.785,\n1.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:7.115,\n3.ts\n#EXT-X-ENDLIST\n'
+  const listing = (source) => () => json([{ start_time: '2026-09-23 03:31:33', session_title: 'Casino', duration: 2298000, source }])
+  const id = '01a0cc51-9208-7921-86fc-339cdd02ceb3'
+  const run = async (routes) => {
+    const { fetchImpl, calls } = fakeFetch(routes)
+    const preview = await getSourcePreview(fetchImpl, `https://kick.com/sachauzumaki/videos/${id}?n=${Math.random()}`)
+    return { preview, calls }
+  }
+
+  const { preview, calls } = await run({
+    'https://kick.com/api/v2/channels/sachauzumaki/videos': listing('https://stream.kick.com/a/media/hls/master.m3u8'),
+    'https://stream.kick.com/a/media/hls/master.m3u8': () => new Response(master),
+    'https://stream.kick.com/a/media/hls/360p/playlist.m3u8': () => new Response(media)
+  })
+  assert.equal(preview.durationSeconds, 25.4)
+  for (const call of calls) assert.equal(call.init.redirect, 'error')
+  assert.equal(calls.filter((call) => call.url.includes('playlist.m3u8')).length, 1)
+
+  // An unfinished playlist or a variant on another host keeps Kick's figure.
+  const live = await run({
+    'https://kick.com/api/v2/channels/sachauzumaki/videos': listing('https://stream.kick.com/b/master.m3u8'),
+    'https://stream.kick.com/b/master.m3u8': () => new Response(master),
+    'https://stream.kick.com/b/360p/playlist.m3u8': () => new Response(media.replace('#EXT-X-ENDLIST\n', ''))
+  })
+  assert.equal(live.preview.durationSeconds, 2298)
+  const foreign = await run({
+    'https://kick.com/api/v2/channels/sachauzumaki/videos': listing('https://stream.kick.com/c/master.m3u8'),
+    'https://stream.kick.com/c/master.m3u8': () => new Response(master.replace('360p/playlist.m3u8', 'https://evil.example/p.m3u8'))
+  })
+  assert.equal(foreign.preview.durationSeconds, 2298)
+  assert.equal(foreign.calls.some((call) => call.url.includes('evil.example')), false)
+
+  assert.equal(playlistSeconds(media.replace('#EXTINF:5.785', '#EXTINF:abc')), null)
+  assert.equal(playlistSeconds('#EXTM3U\n#EXT-X-ENDLIST\n'), null)
+})

@@ -15,6 +15,7 @@ export function validateJobConfig(value: unknown): ClipJobConfig {
   if (typeof v.layoutVision !== 'boolean') throw new Error('Invalid vision option')
   if (v.videoSpeed !== undefined && !isVideoSpeed(v.videoSpeed)) throw new Error('Video speed must be between 1× and 2×')
   if (v.titleLanguage !== undefined && !isTitleLanguage(v.titleLanguage)) throw new Error('Invalid title language')
+  if (v.saveSpace !== undefined && typeof v.saveSpace !== 'boolean') throw new Error('Invalid disk space option')
   if (v.clippingMode !== undefined && !['quality', 'economy', 'advanced'].includes(v.clippingMode)) throw new Error('Invalid clipping mode')
   if (v.clippingMode === 'advanced' && (!isModelId(v.plannerModel) || !isModelId(v.transcriptionModel))) throw new Error('Choose both models in Advanced mode')
   if (v.clippingMode !== 'advanced' && (v.plannerModel !== undefined || v.transcriptionModel !== undefined)) throw new Error('Custom models require Advanced mode')

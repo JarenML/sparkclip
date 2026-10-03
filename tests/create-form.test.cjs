@@ -7,7 +7,7 @@ const { renderToStaticMarkup } = require('react-dom/server')
 
 const bundled = buildSync({
   stdin: {
-    contents: `export { FormatStep, ClipsStep, JobForm, buildJobRequest, parseTrimRange } from './src/renderer/components/JobForm';
+    contents: `export { FormatStep, ClipsStep, VideoStep, ReviewStep, JobForm, buildJobRequest, parseTrimRange } from './src/renderer/components/JobForm';
       export { SetupCard } from './src/renderer/components/SetupCard';
       export { useSettingsStore } from './src/renderer/store/use-settings-store';
       export { useDraftStore } from './src/renderer/store/use-draft-store';
@@ -81,6 +81,11 @@ test('clipping mode is selectable and economy disables paid vision in the submit
   assert.equal(request.layoutVision, false)
   assert.equal(buildJobRequest({ ...draft, clippingMode: 'quality' }, { start: null, end: null }).layoutVision, true)
   assert.equal(buildJobRequest({ ...draft, titleLanguage: 'es' }, { start: null, end: null }).titleLanguage, 'es')
+  // Saving disk space only applies to Twitch and Kick VODs, and is left out when off.
+  const kick = 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'
+  assert.equal(buildJobRequest({ ...draft, source: kick, saveSpace: true }, { start: null, end: null }).saveSpace, true)
+  assert.equal('saveSpace' in buildJobRequest({ ...draft, source: kick, saveSpace: false }, { start: null, end: null }), false)
+  assert.equal('saveSpace' in buildJobRequest({ ...draft, saveSpace: true }, { start: null, end: null }), false)
 })
 
 test('format and framing radio groups each expose one keyboard tab stop', () => {
@@ -261,4 +266,21 @@ test('the trim timeline shows both handles over the source length and open bound
   assert.match(range, /8:30 selected/)
   // Out-of-range typed values are clamped to the source.
   assert.match(render({ start: 5000, end: 9000 }), /aria-label="Trim start"[^>]*aria-valuenow="3599"/)
+})
+
+test('the save-space switch appears only for Twitch and Kick VODs and shows in Review', () => {
+  const { VideoStep, ReviewStep } = form.exports
+  const draft = {
+    source: 'https://example.com/video', trimOpen: false, trimStart: '', trimEnd: '', saveSpace: false,
+    clippingMode: 'quality', aspectRatio: '9:16', layoutStyle: 'auto', layoutVision: true, pacing: 'tight', videoSpeed: 1,
+    durations: [], autoClipCount: true, maxClips: 5, includeCaptions: true, captionPreset: 'pop', titleLanguage: 'auto'
+  }
+  const video = (source) => renderToStaticMarkup(React.createElement(VideoStep, { draft: { ...draft, source }, update() {}, trimError: null }))
+  assert.doesNotMatch(video('https://example.com/video'), /Save disk space/)
+  assert.match(video('https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'), /aria-label="Save disk space"/)
+  assert.match(video('https://www.twitch.tv/videos/12345'), /aria-label="Save disk space"/)
+  const review = (source, saveSpace) => renderToStaticMarkup(React.createElement(ReviewStep, { draft: { ...draft, source, saveSpace }, trim: { start: null, end: null }, onEdit() {} }))
+  assert.match(review('https://www.twitch.tv/videos/12345', true), /480p to plan, each clip in full quality/)
+  assert.doesNotMatch(review('https://www.twitch.tv/videos/12345', false), /480p to plan/)
+  assert.doesNotMatch(review('https://example.com/video', true), /480p to plan/)
 })
