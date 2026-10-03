@@ -150,6 +150,10 @@ export interface BridgeClipAPI {
     openPath: (path: string) => Promise<boolean>
     showItemInFolder: (path: string) => Promise<boolean>
   }
+  clipboard: {
+    /** Copy plain text (up to 8 KB); false if it wasn't copied. */
+    writeText: (text: string) => Promise<boolean>
+  }
   dialog: {
     selectVideo: () => Promise<string | null>
   }
@@ -261,6 +265,9 @@ const api: BridgeClipAPI = {
   shell: {
     openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
     showItemInFolder: (path) => ipcRenderer.invoke('shell:showItemInFolder', path)
+  },
+  clipboard: {
+    writeText: (text) => ipcRenderer.invoke('clipboard:writeText', text)
   },
   dialog: {
     selectVideo: () => ipcRenderer.invoke('dialog:selectVideo')

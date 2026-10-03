@@ -48,7 +48,7 @@ export function ShareDialog({ outputDir, onClose }: { outputDir: string; onClose
   }
   const copy = (): void => {
     if (!link) return
-    void navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => {})
+    void getApi().clipboard.writeText(link).then(setCopied).catch(() => setCopied(false))
   }
 
   return (
