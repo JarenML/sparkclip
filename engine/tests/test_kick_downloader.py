@@ -175,3 +175,25 @@ def test_unmatched_current_links_are_unavailable(service, monkeypatch, listing):
     with pytest.raises(module.VideoDownloadError) as error:
         asyncio.run(service._resolve_kick_vod(V7_URL))
     assert safe_failure_code(error.value) == 'download.kick_unavailable'
+
+
+def test_trimmed_job_downloads_only_its_section(service, monkeypatch, tmp_path):
+    fake_download(monkeypatch, service)
+    sections = []
+
+    class FakeSection(module.yt_dlp.YoutubeDL):
+        def __init__(self, options, section):
+            super().__init__(options)
+            sections.append(section)
+            self.trimmed = module.HlsSection("#EXTM3U\n", start_seconds=270.0, duration_seconds=360.0, total_seconds=2224.0)
+
+    monkeypatch.setattr(module, 'SectionYoutubeDL', FakeSection)
+    result = asyncio.run(service.download_video(URL, str(tmp_path), section=(300.0, 600.0)))
+    assert sections == [(300.0, 600.0)]
+    assert (result.timeline_offset_seconds, result.source_duration_seconds) == (270.0, 2224.0)
+
+    sections.clear()
+    for section in (None, (None, None)):
+        result = asyncio.run(service.download_video(URL, str(tmp_path), section=section))
+        assert (result.timeline_offset_seconds, result.source_duration_seconds) == (0.0, None)
+    assert not sections

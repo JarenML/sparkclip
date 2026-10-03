@@ -43,6 +43,154 @@ MIN_FREE_BYTES = 1000 ** 3
 PROBE_TIMEOUT_SECONDS = 30
 MAX_PROBE_OUTPUT_BYTES = 1024 * 1024
 
+# A trimmed Twitch or Kick job downloads only the HLS segments covering its
+# window, plus this much on each side for sentence snapping and transcription.
+SECTION_PAD_SECONDS = 30
+MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
+# Playlist-wide tags that only appear before the first segment.
+HLS_HEADER_TAGS = (
+    "#EXTM3U", "#EXT-X-VERSION", "#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE",
+    "#EXT-X-DISCONTINUITY-SEQUENCE", "#EXT-X-PLAYLIST-TYPE", "#EXT-X-INDEPENDENT-SEGMENTS",
+    "#EXT-X-START", "#EXT-X-ALLOW-CACHE", "#EXT-X-TWITCH-", "#ID3-EQUIV-TDTG",
+)
+# Segments that depend on state set earlier in the playlist (keys, init
+# sections, byte offsets) can't be cut out of it safely.
+UNTRIMMABLE_HLS_TAGS = ("#EXT-X-KEY", "#EXT-X-SESSION-KEY", "#EXT-X-MAP", "#EXT-X-BYTERANGE", "#EXT-X-PART")
+
+
+@dataclass
+class HlsSection:
+    """A media playlist cut down to the segments around a time window."""
+
+    playlist: str
+    # Where the kept segments start and how long they last, and the whole
+    # playlist's length, in seconds on the timeline a full download produces.
+    start_seconds: float
+    duration_seconds: float
+    total_seconds: float
+
+
+def trim_hls_playlist(
+    text: str, start_seconds: Optional[float], end_seconds: Optional[float], pad_seconds: float = SECTION_PAD_SECONDS,
+) -> Optional[HlsSection]:
+    """Keep the segments of a finished VOD playlist that overlap the window, padded.
+
+    Times are the running sum of #EXTINF durations. That is the timeline of a
+    full download, which joins discontinuities without a gap, so a segment
+    starts at the same second in both. Returns None when the playlist can't be
+    trimmed safely or the window already covers all of it.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines or lines[0] != "#EXTM3U" or "#EXT-X-ENDLIST" not in lines:
+        return None
+    if any(line.startswith(UNTRIMMABLE_HLS_TAGS) for line in lines):
+        return None
+
+    header: list[str] = []
+    segments: list[tuple[list[str], float]] = []
+    pending: list[str] = []
+    duration: Optional[float] = None
+    for line in lines:
+        if line == "#EXT-X-ENDLIST":
+            continue
+        if line.startswith("#EXTINF:"):
+            try:
+                duration = float(line[len("#EXTINF:"):].split(",")[0])
+            except ValueError:
+                return None
+            if not math.isfinite(duration) or duration <= 0:
+                return None
+            pending.append(line)
+        elif line.startswith("#"):
+            if not segments and not pending and line.startswith(HLS_HEADER_TAGS):
+                header.append(line)
+            else:
+                pending.append(line)
+        else:
+            if duration is None:
+                return None
+            segments.append((pending + [line], duration))
+            pending, duration = [], None
+    if not segments or duration is not None:
+        return None
+
+    low = max(0.0, (start_seconds or 0.0) - pad_seconds)
+    high = math.inf if end_seconds is None else end_seconds + pad_seconds
+    kept: list[int] = []
+    elapsed = 0.0
+    starts: list[float] = []
+    for index, (_, length) in enumerate(segments):
+        starts.append(elapsed)
+        if elapsed + length > low and elapsed < high:
+            kept.append(index)
+        elapsed += length
+    if not kept or len(kept) == len(segments):
+        return None
+
+    first = kept[0]
+    out: list[str] = []
+    for line in header:
+        if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
+            try:
+                line = f"#EXT-X-MEDIA-SEQUENCE:{int(line.split(':', 1)[1]) + first}"
+            except ValueError:
+                return None
+        out.append(line)
+    for index in kept:
+        out.extend(segments[index][0])
+    out.append("#EXT-X-ENDLIST")
+    last = kept[-1]
+    return HlsSection(
+        playlist="\n".join(out) + "\n",
+        start_seconds=round(starts[first], 3),
+        duration_seconds=round(starts[last] + segments[last][1] - starts[first], 3),
+        total_seconds=round(elapsed, 3),
+    )
+
+
+class SectionYoutubeDL(yt_dlp.YoutubeDL):
+    """Hands yt-dlp's native HLS downloader a playlist trimmed to a time window.
+
+    yt-dlp's own download_ranges switches to FFmpeg, which opens its own
+    connections and would bypass the socket guard; this keeps every request
+    on the guarded Python network stack. Anything that can't be trimmed is
+    downloaded in full, as before.
+    """
+
+    def __init__(self, params: dict, section: tuple[Optional[float], Optional[float]]):
+        super().__init__(params)
+        self.section = section
+        self.trimmed: Optional[HlsSection] = None
+
+    def dl(self, name, info, subtitle=False, test=False):
+        if not subtitle and not test and info.get("protocol") in ("m3u8", "m3u8_native") \
+                and not info.get("hls_media_playlist_data"):
+            trimmed = self._trim(info)
+            if trimmed:
+                info = {**info, "hls_media_playlist_data": trimmed.playlist}
+                self.trimmed = trimmed
+        return super().dl(name, info, subtitle, test)
+
+    def _trim(self, info: dict) -> Optional[HlsSection]:
+        try:
+            request = yt_dlp.networking.Request(info["url"], headers=info.get("http_headers") or {})
+            with self.urlopen(request) as response:
+                body = response.read(MAX_PLAYLIST_BYTES + 1)
+            if len(body) > MAX_PLAYLIST_BYTES:
+                return None
+            trimmed = trim_hls_playlist(body.decode("utf-8", "replace"), *self.section)
+        except Exception as error:
+            logger.warning("Could not trim the VOD playlist (%s); downloading it in full", type(error).__name__)
+            return None
+        if trimmed:
+            logger.info(
+                "Downloading %.0fs of the %.0fs VOD, from %.1fs",
+                trimmed.duration_seconds, trimmed.total_seconds, trimmed.start_seconds,
+            )
+        else:
+            logger.info("The VOD playlist can't be trimmed to the selected range; downloading it in full")
+        return trimmed
+
 # YouTube format selection. Filters only exclude AV1, which the bundled FFmpeg
 # cannot decode in software; the sort picks the best remaining stream.
 # H.264 tops out at 1080p on YouTube, so 1440p/2160p arrives as VP9.
@@ -202,6 +350,10 @@ class DownloadResult:
     metadata: VideoMetadata
     file_size_bytes: int
     source_type: VideoSourceType
+    # Set when only part of a VOD was downloaded: where the file starts on the
+    # full VOD's timeline, and the full VOD's length (metadata has the file's).
+    timeline_offset_seconds: float = 0.0
+    source_duration_seconds: Optional[float] = None
 
 
 class VideoDownloaderService:
@@ -373,16 +525,20 @@ class VideoDownloaderService:
         output_filename: str = "source.mp4",
         max_duration_seconds: Optional[int] = None,
         s3_bucket: Optional[str] = None,
+        section: Optional[tuple[Optional[float], Optional[float]]] = None,
     ) -> DownloadResult:
         """
         Download a video from various sources.
-        
+
         Args:
             url: Video URL (YouTube, S3, direct) or S3 key
             output_dir: Directory to save the video
             output_filename: Output filename (default: source.mp4)
             max_duration_seconds: Maximum duration to download
             s3_bucket: S3 bucket (required if url is an S3 key)
+            section: Optional (start, end) seconds the job will use. Twitch and
+                Kick VODs then download only that part (see SectionYoutubeDL);
+                the result's timeline_offset_seconds says where it starts.
             
         Returns:
             DownloadResult with path and metadata
@@ -405,7 +561,9 @@ class VideoDownloaderService:
                 vod_url = vod_platform(url)[1]
                 if source_type == "kick":
                     vod_url = await self._resolve_kick_vod(vod_url)
-                result = await self._download_from_youtube(vod_url, output_path, output_dir, max_duration_seconds, source_type=source_type)
+                result = await self._download_from_youtube(
+                    vod_url, output_path, output_dir, max_duration_seconds, source_type=source_type, section=section,
+                )
             elif source_type == "youtube":
                 result = await self._download_from_youtube(url, output_path, output_dir, max_duration_seconds)
             else:
@@ -457,6 +615,7 @@ class VideoDownloaderService:
         output_dir: str,
         max_duration_seconds: Optional[int] = None,
         source_type: VideoSourceType = "youtube",
+        section: Optional[tuple[Optional[float], Optional[float]]] = None,
     ) -> DownloadResult:
         """
         Download video from YouTube, Twitch or Kick using yt-dlp Python library.
@@ -502,9 +661,13 @@ class VideoDownloaderService:
 
         # Run download in thread pool to not block event loop
         loop = asyncio.get_event_loop()
+        if source_type not in VOD_PLATFORMS or not section or section == (None, None):
+            section = None
+        trimmed: Optional[HlsSection] = None
 
         def do_download() -> None:
             """Try compatible formats through the guarded Python network stack."""
+            nonlocal trimmed
             logger.info("Attempting video download")
 
             last_error = None
@@ -528,9 +691,15 @@ class VideoDownloaderService:
                     if time.monotonic() > deadline:
                         raise VideoDownloadError("Video download deadline exceeded")
 
+                    trimmed = None
                     with guarded_ytdlp_children(deadline), guarded_public_connections():
-                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                            ydl.download([url])
+                        if section:
+                            with SectionYoutubeDL(ydl_opts, section) as ydl:
+                                ydl.download([url])
+                                trimmed = ydl.trimmed
+                        else:
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([url])
 
                     # If we get here, download succeeded
                     logger.info("Video download succeeded")
@@ -642,6 +811,8 @@ class VideoDownloaderService:
             metadata=actual_metadata,
             file_size_bytes=file_size,
             source_type=source_type,
+            timeline_offset_seconds=trimmed.start_seconds if trimmed else 0.0,
+            source_duration_seconds=trimmed.total_seconds if trimmed else None,
         )
 
     async def _download_from_s3(

@@ -19,7 +19,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -50,6 +50,7 @@ from clip_engine.services.transcription_service import (
     NoAudioTrackError,
     TranscriptionResult,
     TranscriptionService,
+    TranscriptSegment,
 )
 from clip_engine.services.visual_clip_sampling import has_visual_change, sample_visual_planning_frames
 from clip_engine.services.video_downloader import (
@@ -234,9 +235,22 @@ class AIClippingPipeline:
             download_result = await self.video_downloader.download_video(
                 url=request.video_url,
                 output_dir=work_dir,
+                section=(request.start_time_seconds, request.end_time_seconds),
             )
             stage_timings["download"] = time.perf_counter() - stage_start
             logger.info(f"Downloaded: {download_result.metadata.title}")
+
+            # A VOD may arrive as just the selected part. Every later step then
+            # works on the downloaded file's timeline, and saved times are
+            # shifted back onto the full VOD's (see _on_source_timeline).
+            offset_ms = round(download_result.timeline_offset_seconds * 1000)
+            if offset_ms:
+                offset = download_result.timeline_offset_seconds
+                logger.info(f"Partial download starts at {offset:.1f}s of the source")
+                if request.start_time_seconds is not None:
+                    request.start_time_seconds = max(0.0, request.start_time_seconds - offset)
+                if request.end_time_seconds is not None:
+                    request.end_time_seconds = max(0.0, request.end_time_seconds - offset)
 
             video_duration = download_result.metadata.duration_seconds
             logger.info(f"Video duration: {video_duration:.1f}s ({video_duration/60:.1f} minutes)")
@@ -294,7 +308,10 @@ class AIClippingPipeline:
                     visual_frames = []
 
             transcript_data = {
-                "segments": [asdict(s) for s in transcription_result.segments],
+                "segments": [
+                    asdict(self._transcript_on_source_timeline(s, offset_ms))
+                    for s in transcription_result.segments
+                ],
                 "full_text": transcription_result.full_text,
                 "language": transcription_result.language,
                 "status": transcription_status,
@@ -348,7 +365,7 @@ class AIClippingPipeline:
                 )
 
             plan_data = {
-                "segments": [asdict(s) for s in clip_plan.segments],
+                "segments": [asdict(self._on_source_timeline(s, offset_ms)) for s in clip_plan.segments],
                 "total_clips": clip_plan.total_clips,
                 "target_platform": clip_plan.target_platform,
                 "insights": clip_plan.insights,
@@ -488,7 +505,10 @@ class AIClippingPipeline:
                 logger.error(f"Clip {i + 1} failed to render, skipping it: {error}")
             if not successes:
                 raise failures[0][1]
-            rendered_clips = [(path, segment) for _, path, segment in successes]
+            # Rendering is done with the downloaded file: from here on, clip
+            # times are only reported, so put them on the source's timeline.
+            rendered_clips = [(path, self._on_source_timeline(segment, offset_ms)) for _, path, segment in successes]
+            source_duration = download_result.source_duration_seconds or download_result.metadata.duration_seconds
             # Output clips are renumbered 0..n-1; carry their durations and
             # layout records across so they still line up after a failure.
             new_index = {orig_i: k for k, (orig_i, _, _) in enumerate(successes)}
@@ -527,7 +547,7 @@ class AIClippingPipeline:
                     job_id=job_id,
                     source_video_url=request.video_url,
                     source_video_title=download_result.metadata.title,
-                    source_video_duration_seconds=download_result.metadata.duration_seconds,
+                    source_video_duration_seconds=source_duration,
                     total_clips=len(clip_artifacts),
                     clips=clip_artifacts,
                     user_id=request.owner_user_id,
@@ -694,7 +714,7 @@ class AIClippingPipeline:
                 job_id=job_id,
                 source_video_url=request.video_url,
                 source_video_title=download_result.metadata.title,
-                source_video_duration_seconds=download_result.metadata.duration_seconds,
+                source_video_duration_seconds=source_duration,
                 total_clips=len(clip_artifacts),
                 clips=clip_artifacts,
                 user_id=request.owner_user_id,
@@ -932,6 +952,37 @@ class AIClippingPipeline:
                 continue
             filtered.append(seg)
         return filtered
+
+    @staticmethod
+    def _on_source_timeline(segment: ClipPlanSegment, offset_ms: int) -> ClipPlanSegment:
+        """A copy of a planned clip with its source times moved by offset_ms.
+
+        Chapters on the rendered clip's own timeline (output_chapters) stay put.
+        """
+        if not offset_ms:
+            return segment
+        return replace(
+            segment,
+            start_time_ms=segment.start_time_ms + offset_ms,
+            end_time_ms=segment.end_time_ms + offset_ms,
+            skip_ranges_ms=[(start + offset_ms, end + offset_ms) for start, end in segment.skip_ranges_ms],
+            chapters=[(time_ms + offset_ms, title) for time_ms, title in segment.chapters],
+        )
+
+    @staticmethod
+    def _transcript_on_source_timeline(segment: TranscriptSegment, offset_ms: int) -> TranscriptSegment:
+        """A copy of a transcript segment, and its words, moved by offset_ms."""
+        if not offset_ms:
+            return segment
+        return replace(
+            segment,
+            start_time_ms=segment.start_time_ms + offset_ms,
+            end_time_ms=segment.end_time_ms + offset_ms,
+            words=[
+                replace(word, start_time_ms=word.start_time_ms + offset_ms, end_time_ms=word.end_time_ms + offset_ms)
+                for word in segment.words
+            ],
+        )
 
     def _update_progress(
         self,
