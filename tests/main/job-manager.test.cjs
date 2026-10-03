@@ -17,7 +17,7 @@ function loadModule(file, mocks = {}) {
 }
 
 const jobs = loadModule('shared/jobs.ts')
-const jobOutput = loadModule('shared/job-output.ts')
+const jobOutput = loadModule('shared/job-output.ts', { './job-contract': loadModule('shared/job-contract.ts') })
 
 /** A job manager wired to a fake runner that records each start and lets the test drive it. */
 function setup() {

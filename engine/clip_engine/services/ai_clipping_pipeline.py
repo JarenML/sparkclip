@@ -97,6 +97,8 @@ class ClippingJobRequest:
     target_platform: str = "tiktok"
     include_captions: bool = True
     caption_style: Optional[CaptionStyle] = None
+    # The caption style's preset name, for the job's record.
+    caption_preset: Optional[str] = None
     callback_url: Optional[str] = None
     start_time_seconds: Optional[float] = None
     end_time_seconds: Optional[float] = None
@@ -737,6 +739,15 @@ class AIClippingPipeline:
                     - (request.start_time_seconds or 0),
                 ),
                 "requested_settings": {
+                    # The range as requested, on the source's timeline (a
+                    # partial download moves request times onto the file's).
+                    "start_time_seconds": requested_section[0],
+                    "end_time_seconds": requested_section[1],
+                    "duration_ranges": request.duration_ranges,
+                    "max_clips": None if request.auto_clip_count else request.max_clips,
+                    "auto_clip_count": request.auto_clip_count,
+                    "include_captions": request.include_captions,
+                    "caption_preset": request.caption_preset,
                     "clipping_mode": self.settings.clipping_mode,
                     "planner_model": self.settings.planner_model,
                     "transcription_model": self.settings.transcription_model,

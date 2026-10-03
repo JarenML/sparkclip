@@ -14,17 +14,17 @@ function loadSource(file, mocks = {}, globals = {}) {
   vm.runInNewContext(js, { module, exports: module.exports, require: (id) => mocks[id] ?? require(id), URL, Set, Map, process, Buffer, console, setTimeout, clearTimeout, __dirname: path.join(__dirname, '../../src/main'), ...globals })
   return module.exports
 }
-function loadShared(file) {
+function loadShared(file, mocks = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../../src/shared', file), 'utf8')
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const module = { exports: {} }
-  vm.runInNewContext(js, { module, exports: module.exports, require, URL })
+  vm.runInNewContext(js, { module, exports: module.exports, require: (id) => mocks[id] ?? require(id), URL })
   return module.exports
 }
 const TEST_WORK_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'bridgeclip-worker-test-'))
 process.on('exit', () => fs.rmSync(TEST_WORK_HOME, { recursive: true, force: true }))
 const jobContract = loadShared('job-contract.ts')
-const jobOutput = loadShared('job-output.ts')
+const jobOutput = loadShared('job-output.ts', { './job-contract': jobContract })
 const videoSource = loadShared('video-source.ts')
 const runHistory = loadSource('run-history.ts', { '../shared/video-source': videoSource })
 const security = loadSource('security.ts', { electron: {}, '../shared/brand': loadShared('brand.ts') })

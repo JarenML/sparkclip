@@ -68,6 +68,7 @@ class BridgeTests(unittest.TestCase):
             self.assertTrue(asyncio.run(bridge.run(self.config())))
         self.assertIn('"type": "result"', output.getvalue())
         self.assertEqual(requests[-1]["video_speed"], 1)
+        self.assertEqual(requests[-1]["caption_preset"], "pop")
         with patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()):
             self.assertTrue(asyncio.run(bridge.run(self.config(video_speed=1.5))))
         self.assertEqual(requests[-1]["video_speed"], 1.5)

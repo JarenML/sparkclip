@@ -15,6 +15,7 @@ const bundled = buildSync({
       export { TrimTimeline } from './src/renderer/components/TrimTimeline';
       export { ClipList, framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
       export { formatBytes } from './src/renderer/lib/utils';
+      export { jobInfoSections, rangeLabel } from './src/renderer/components/JobInfoDialog';
       export { qrDataUrl } from './src/renderer/components/ShareDialog';
       export { parseJobOutput, starredClips } from './src/shared/job-output';
       export { ScoreBreakdown } from './src/renderer/components/ClipCard';
@@ -294,6 +295,44 @@ test('a run view offers Delete job only when it can delete, and freed space read
   assert.match(view({ onDelete() {} }), />Delete job</)
   assert.doesNotMatch(view({}), /Delete job/)
   assert.deepEqual([285212672, 1503238553, 2048, 12].map(formatBytes), ['272 MB', '1.4 GB', '2 KB', '12 bytes'])
+})
+
+test('job details show the pasted link, the clipped range and the settings, and say what older runs lack', () => {
+  const { parseJobOutput, jobInfoSections, rangeLabel } = form.exports
+  const entry = { jobId: 'j', date: '2026-10-03T22:11:00.000Z', videoTitle: 'DIA 17/365', clipCount: 10, status: 'completed', outputDir: 'C:/Users/me/SparkClip/j', totalCostUsd: 0.31, finishedAt: null, durationMs: 1011000, errorMessage: null }
+  const output = parseJobOutput({
+    source_video_url: 'https://kick.com/pieroarenast/videos/01a0f53a-d648-7ae5-a441-26abca80991a', source_video_title: 'DIA 17/365', source_video_duration_seconds: 7378.8,
+    clips: [],
+    metrics: {
+      analysis_duration_seconds: 3621,
+      requested_settings: {
+        start_time_seconds: 3600, end_time_seconds: 7221, duration_ranges: ['short', 'medium', 'bogus'], max_clips: null, auto_clip_count: true,
+        include_captions: true, caption_preset: 'pop', clipping_mode: 'quality', planner_model: 'anthropic/claude-opus-5.5',
+        transcription_model: 'microsoft/mai-transcribe-2', aspect_ratio: '9:16', layout_style: 'auto', layout_vision_enabled: true,
+        pacing: 'tight', title_language: 'auto', video_speed: 1, save_space: true, caption_preset_extra: 'ignored'
+      },
+      api_costs: { total_estimated_cost_usd: 0.31, transcription: { estimated_cost_usd: 0.2 }, planning: { estimated_cost_usd: 0.11 } }
+    }
+  })
+  assert.deepEqual(output.metrics.requested_settings.duration_ranges, ['short', 'medium'])
+  assert.equal('caption_preset_extra' in output.metrics.requested_settings, false)
+  const rows = Object.fromEntries(jobInfoSections(entry, output).flatMap((section) => section.rows.map((row) => [row.label, row.value])))
+  assert.equal(rows.Link, 'https://kick.com/pieroarenast/videos/01a0f53a-d648-7ae5-a441-26abca80991a')
+  assert.equal(rows.Range, '1:00:00 → 2:00:21')
+  assert.equal(rows.Analyzed, '1:00:21')
+  assert.equal(rows.Lengths, 'Short (30–60s), Medium (1–2m)')
+  assert.equal(rows['How many'], 'AI decides')
+  assert.equal(rows.Disk, 'Save disk space')
+  assert.equal(rows.Titles, 'Same as the video')
+  assert.match(rows['API cost'], /^\$0\.31 \(transcription \$0\.20, planning \$0\.11\)$/)
+  assert.equal(rows.Folder, 'C:/Users/me/SparkClip/j')
+
+  assert.equal(rangeLabel({ start_time_seconds: null, end_time_seconds: null }), 'Whole video')
+  assert.equal(rangeLabel({ start_time_seconds: 90, end_time_seconds: null }), '1:30 → End')
+  assert.match(rangeLabel({ clipping_mode: 'quality' }), /^Not recorded/)
+  const failed = jobInfoSections({ ...entry, status: 'failed', errorMessage: 'Kick VOD unavailable', totalCostUsd: null }, null)
+  assert.deepEqual(failed.map((section) => section.title), ['Source', 'Run'])
+  assert.ok(failed[1].rows.some((row) => row.label === 'Error' && row.value === 'Kick VOD unavailable'))
 })
 
 test('runs with clips can be opened on a phone through a QR code', () => {
