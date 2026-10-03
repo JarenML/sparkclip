@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, net, shell } from 'electron'
 import { existsSync, realpathSync } from 'fs'
 import { loadSettings, publicSettings, replaceApiKey, savePublicSettings, type ApiKeyName, type PublicSettings } from './settings-store'
 import { deleteRun, ensureOutputDir, getJobHistory, getJobOutput, generateThumbnail } from './file-manager'
@@ -286,6 +286,14 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       assertMediaPath(canonical, loadSettings().outputDirectory)
     }
     return (await shell.openPath(canonical)) === ''
+  })
+
+  // The window denies every web permission, clipboard writes included, so
+  // copying goes through here: plain text only, and short.
+  handle('clipboard:writeText', (_event, text: unknown) => {
+    if (typeof text !== 'string' || text.length === 0 || text.length > 8192) return false
+    clipboard.writeText(text)
+    return true
   })
 
   handle('shell:showItemInFolder', (_event, path: string) => {

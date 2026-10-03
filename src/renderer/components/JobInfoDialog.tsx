@@ -145,7 +145,7 @@ export function JobInfoDialog({ entry, onClose }: { entry: HistoryEntry; onClose
   }, [onClose])
 
   const copy = (row: InfoRow): void => {
-    void navigator.clipboard.writeText(row.value).then(() => setCopied(row.label)).catch(() => {})
+    void getApi().clipboard.writeText(row.value).then((ok) => setCopied(ok ? row.label : null)).catch(() => setCopied(null))
   }
 
   return (
