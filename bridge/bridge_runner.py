@@ -234,13 +234,16 @@ async def run(config: dict) -> bool:
         return False
 
     caption_style = None
+    caption_preset = None
     preset_name = config.get("caption_preset", "pop")
     if config.get("include_captions", True):
         try:
             caption_style = get_caption_preset(preset_name)
+            caption_preset = preset_name
         except ValueError:
             try:
                 caption_style = get_caption_preset("pop")
+                caption_preset = "pop"
             except ValueError:
                 pass
 
@@ -264,6 +267,7 @@ async def run(config: dict) -> bool:
         video_speed=config.get("video_speed", 1.0),
         include_captions=config.get("include_captions", True),
         caption_style=caption_style,
+        caption_preset=caption_preset,
         start_time_seconds=config.get("start_time_seconds"),
         end_time_seconds=config.get("end_time_seconds"),
         banner_platform=config.get("banner_platform"),

@@ -1,3 +1,5 @@
+import { DURATION_IDS, isTitleLanguage } from './job-contract'
+
 /** The five criteria the planner scores every clip on, 0-10 each. */
 export const RUBRIC = [
   { key: 'hook', label: 'Hook', hint: 'Grabs attention in the first seconds' },
@@ -157,6 +159,17 @@ function safeMetrics(value: unknown): Record<string, unknown> | null {
     if (typeof requested.layout_vision_enabled === 'boolean') safe.layout_vision_enabled = requested.layout_vision_enabled
     if (requested.pacing === 'tight' || requested.pacing === 'natural') safe.pacing = requested.pacing
     if (typeof requested.video_speed === 'number' && Number.isFinite(requested.video_speed) && requested.video_speed >= 1 && requested.video_speed <= 2) safe.video_speed = requested.video_speed
+    if (isTitleLanguage(requested.title_language)) safe.title_language = requested.title_language
+    for (const field of ['save_space', 'auto_clip_count', 'include_captions']) {
+      if (typeof requested[field] === 'boolean') safe[field] = requested[field]
+    }
+    // The trim range on the source's timeline; null means that end was open.
+    for (const field of ['start_time_seconds', 'end_time_seconds']) {
+      if (requested[field] === null || nonNegative(requested[field])) safe[field] = requested[field]
+    }
+    if (Array.isArray(requested.duration_ranges)) safe.duration_ranges = requested.duration_ranges.filter((id) => DURATION_IDS.includes(id as string)).slice(0, DURATION_IDS.length)
+    if (Number.isSafeInteger(requested.max_clips) && (requested.max_clips as number) >= 1 && (requested.max_clips as number) <= 100) safe.max_clips = requested.max_clips
+    if (typeof requested.caption_preset === 'string' && /^[a-z]{1,30}$/.test(requested.caption_preset)) safe.caption_preset = requested.caption_preset
     result.requested_settings = safe
   }
   for (const field of ['planned_clip_count', 'rendered_clip_count', 'failed_clip_count', 'uploaded_clip_count',

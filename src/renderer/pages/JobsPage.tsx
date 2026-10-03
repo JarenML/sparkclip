@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Ban, FolderOpen, ListVideo, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from 'lucide-react'
+import { Ban, Eye, FolderOpen, ListVideo, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from 'lucide-react'
 import type { HistoryEntry } from '../../preload/index'
 import { parseJobOutput } from '../../shared/job-output'
 import { MAX_PARALLEL_JOBS } from '../../shared/jobs'
 import { BackLink, ClipList } from '../components/ClipList'
 import { useDeleteRun } from '../components/DeleteRun'
+import { JobInfoDialog } from '../components/JobInfoDialog'
 import { JobFailure, JobProgress, STAGE_LABELS } from '../components/JobProgress'
 import type { Page as AppPage } from '../components/Sidebar'
 import { StatusDot } from '../components/ui/Badge'
@@ -58,6 +59,8 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
   const [refreshing, setRefreshing] = useState(false)
   const [openRun, setOpenRun] = useState<{ entry: HistoryEntry; output: JobOutput } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [info, setInfo] = useState<HistoryEntry | null>(null)
+  const closeInfo = useCallback(() => setInfo(null), [])
   const requestId = useRef(0)
 
   const load = useCallback(async (manual = false) => {
@@ -192,13 +195,15 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
         notice={notice}
         onDismissNotice={() => setNotice(null)}
         onDelete={(entry) => deleteRun.ask({ jobId: entry.jobId, title: entry.videoTitle, clipCount: entry.clipCount })}
+        onInfo={setInfo}
       />
       {deleteRun.dialog}
+      {info && <JobInfoDialog entry={info} onClose={closeInfo} />}
     </>
   )
 }
 
-function JobsList({ active, entries, filter, query, error, refreshing, onFilter, onQuery, onDismissError, onRefresh, onNew, onOpenJob, onCancel, onOpenEntry, onOpenFolder, notice, onDismissNotice, onDelete }: {
+function JobsList({ active, entries, filter, query, error, refreshing, onFilter, onQuery, onDismissError, onRefresh, onNew, onOpenJob, onCancel, onOpenEntry, onOpenFolder, notice, onDismissNotice, onDelete, onInfo }: {
   active: Job[]
   entries: HistoryEntry[] | null
   filter: Filter
@@ -217,6 +222,7 @@ function JobsList({ active, entries, filter, query, error, refreshing, onFilter,
   notice: string | null
   onDismissNotice: () => void
   onDelete: (entry: HistoryEntry) => void
+  onInfo: (entry: HistoryEntry) => void
 }): React.JSX.Element {
   const sessionJobs = useJobStore((s) => s.jobs)
   const liveIds = useMemo(() => new Set(active.map((job) => job.id)), [active])
@@ -347,7 +353,7 @@ function JobsList({ active, entries, filter, query, error, refreshing, onFilter,
               ) : (
                 <ul className="divide-y divide-white/[0.05]">
                   {visible.map((entry) => (
-                    <PreviousJobRow key={entry.jobId} entry={entry} hasDetails={Boolean(sessionJobs[entry.jobId])} onOpen={() => onOpenEntry(entry)} onOpenFolder={() => onOpenFolder(entry.outputDir)} onDelete={() => onDelete(entry)} />
+                    <PreviousJobRow key={entry.jobId} entry={entry} hasDetails={Boolean(sessionJobs[entry.jobId])} onOpen={() => onOpenEntry(entry)} onOpenFolder={() => onOpenFolder(entry.outputDir)} onDelete={() => onDelete(entry)} onInfo={() => onInfo(entry)} />
                   ))}
                 </ul>
               )}
@@ -441,7 +447,7 @@ const STATUS_TEXT: Record<HistoryEntry['status'], string> = {
 }
 
 /** One line per run: status, title, then clips, run time, cost and date in aligned columns. */
-function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder, onDelete }: { entry: HistoryEntry; hasDetails: boolean; onOpen: () => void; onOpenFolder: () => void; onDelete: () => void }): React.JSX.Element {
+function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder, onDelete, onInfo }: { entry: HistoryEntry; hasDetails: boolean; onOpen: () => void; onOpenFolder: () => void; onDelete: () => void; onInfo: () => void }): React.JSX.Element {
   const status = STATUS[entry.status]
   const completed = entry.status === 'completed'
   // Failed and cancelled jobs from this session keep their options, so they can run again.
@@ -479,6 +485,16 @@ function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder, onDelete }: {
       ) : (
         <div className={cellClass}>{cells}</div>
       )}
+      <Button
+        size="sm"
+        variant="ghost"
+        iconOnly
+        aria-label={`Details for ${entry.videoTitle}`}
+        title="Details"
+        icon={<Eye className="h-3.5 w-3.5" />}
+        onClick={onInfo}
+        className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+      />
       <Button
         size="sm"
         variant="ghost"

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Clapperboard, FolderOpen, ListVideo, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { AlertTriangle, Clapperboard, Eye, FolderOpen, ListVideo, RefreshCw, Search, Sparkles } from 'lucide-react'
 import { getApi } from '../lib/ipc'
 import { cn, errorMessage, formatRelativeDate, formatUsd, localFileUrl } from '../lib/utils'
 import { clipFilePath, loadThumbnail } from '../lib/thumbnails'
@@ -9,6 +9,7 @@ import { parseJobOutput } from '../../shared/job-output'
 import type { HistoryEntry } from '../../preload/index'
 import { BackLink, ClipList } from '../components/ClipList'
 import { useDeleteRun } from '../components/DeleteRun'
+import { JobInfoDialog } from '../components/JobInfoDialog'
 import { Page } from '../components/ui/Page'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
@@ -27,6 +28,8 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
   const openRequestId = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [info, setInfo] = useState<HistoryEntry | null>(null)
+  const closeInfo = useCallback(() => setInfo(null), [])
   const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
@@ -198,6 +201,7 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
                 key={entry.jobId}
                 entry={entry}
                 onOpen={() => openRun(entry)}
+                onInfo={() => setInfo(entry)}
                 onOpenFolder={async () => {
                   try {
                     if (!await getApi().shell.openPath(entry.outputDir)) setError('This run folder is no longer available.')
@@ -210,13 +214,15 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
           </div>
         )}
       </div>
+      {info && <JobInfoDialog entry={info} onClose={closeInfo} />}
     </Page>
   )
 }
 
-function RunCard({ entry, onOpen, onOpenFolder }: {
+function RunCard({ entry, onOpen, onInfo, onOpenFolder }: {
   entry: HistoryEntry
   onOpen: () => void
+  onInfo: () => void
   onOpenFolder: () => void
 }): React.JSX.Element {
   const failed = entry.status !== 'completed'
@@ -224,56 +230,67 @@ function RunCard({ entry, onOpen, onOpenFolder }: {
   const [previewFailed, setPreviewFailed] = useState(false)
 
   return (
-    <button
-      onClick={failed ? onOpenFolder : onOpen}
-      aria-label={failed ? `Open folder for ${entry.status === 'incomplete' ? 'unfinished' : 'unreadable'} run` : undefined}
-      className={cn(
-        'glass group rounded-2xl p-1.5 text-left transition-[transform,box-shadow] duration-300 ease-out',
-        'hover:-translate-y-1 hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.1),0_0_0_1px_rgb(255_255_255/0.08),0_28px_56px_-24px_rgb(0_0_0/0.8)]'
-      )}
-    >
-      <div className="relative aspect-video overflow-hidden rounded-xl bg-black/40 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)]">
-        {thumb && !previewFailed ? (
-          <>
-            {/* Vertical clips sit on a blurred copy of themselves to fill the 16:9 frame. */}
-            <img src={localFileUrl(thumb)} alt="" className="absolute inset-0 h-full w-full scale-125 object-cover opacity-60 blur-2xl saturate-150" />
-            <img
-              src={localFileUrl(thumb)}
-              alt=""
-              draggable={false}
-              className="relative h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.04]"
-              onError={() => setPreviewFailed(true)}
-            />
-          </>
-        ) : failed ? (
-          <div className="flex h-full items-center justify-center text-danger/70">
-            <AlertTriangle className="h-6 w-6" />
-          </div>
-        ) : (
-          <Skeleton className="h-full rounded-none" />
+    <div className="relative">
+      <button
+        onClick={failed ? onOpenFolder : onOpen}
+        aria-label={failed ? `Open folder for ${entry.status === 'incomplete' ? 'unfinished' : 'unreadable'} run` : undefined}
+        className={cn(
+          'glass group rounded-2xl p-1.5 text-left transition-[transform,box-shadow] duration-300 ease-out',
+          'hover:-translate-y-1 hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.1),0_0_0_1px_rgb(255_255_255/0.08),0_28px_56px_-24px_rgb(0_0_0/0.8)]'
         )}
-        {!failed && (
-          <span className="glass-chip absolute bottom-2.5 right-2.5 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-2xs font-medium text-white">
-            <Clapperboard className="h-3 w-3" />
-            {entry.clipCount} clip{entry.clipCount === 1 ? '' : 's'}
-          </span>
-        )}
-      </div>
-      <div className="px-2 pb-2 pt-3.5">
-        <p className="truncate text-sm font-medium text-ink" title={entry.videoTitle}>
-          {failed ? `${entry.status === 'incomplete' ? 'Unfinished' : 'Unreadable'} run · Open folder` : entry.videoTitle}
-        </p>
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-subtle">
-          <span>{formatRelativeDate(entry.date)}</span>
-          {entry.totalCostUsd != null && (
+      >
+        <div className="relative aspect-video overflow-hidden rounded-xl bg-black/40 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)]">
+          {thumb && !previewFailed ? (
             <>
-              <span className="text-ink-faint">·</span>
-              <span className="font-mono tabular">{formatUsd(entry.totalCostUsd)}</span>
+              {/* Vertical clips sit on a blurred copy of themselves to fill the 16:9 frame. */}
+              <img src={localFileUrl(thumb)} alt="" className="absolute inset-0 h-full w-full scale-125 object-cover opacity-60 blur-2xl saturate-150" />
+              <img
+                src={localFileUrl(thumb)}
+                alt=""
+                draggable={false}
+                className="relative h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-[1.04]"
+                onError={() => setPreviewFailed(true)}
+              />
             </>
+          ) : failed ? (
+            <div className="flex h-full items-center justify-center text-danger/70">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+          ) : (
+            <Skeleton className="h-full rounded-none" />
           )}
-        </p>
-      </div>
-    </button>
+          {!failed && (
+            <span className="glass-chip absolute bottom-2.5 right-2.5 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-2xs font-medium text-white">
+              <Clapperboard className="h-3 w-3" />
+              {entry.clipCount} clip{entry.clipCount === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+        <div className="px-2 pb-2 pt-3.5">
+          <p className="truncate text-sm font-medium text-ink" title={entry.videoTitle}>
+            {failed ? `${entry.status === 'incomplete' ? 'Unfinished' : 'Unreadable'} run · Open folder` : entry.videoTitle}
+          </p>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-subtle">
+            <span>{formatRelativeDate(entry.date)}</span>
+            {entry.totalCostUsd != null && (
+              <>
+                <span className="text-ink-faint">·</span>
+                <span className="font-mono tabular">{formatUsd(entry.totalCostUsd)}</span>
+              </>
+            )}
+          </p>
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={onInfo}
+        aria-label={`Details for ${entry.videoTitle}`}
+        title="Details"
+        className="glass-chip absolute right-3.5 top-3.5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors hover:bg-white/25"
+      >
+        <Eye className="h-4 w-4" />
+      </button>
+    </div>
   )
 }
 

@@ -197,6 +197,9 @@ def test_pipeline_reports_partial_download_times_on_the_source_timeline(monkeypa
     clip = result.output.clips[0]
     assert (clip.start_time_ms, clip.end_time_ms, clip.duration_ms) == (340_000, 370_000, 22_000)
     assert result.output.source_video_duration_seconds == 2224.0
+    # The job records the range as requested, not the shifted one it ran with.
+    requested = result.output.metrics["requested_settings"]
+    assert (requested["start_time_seconds"], requested["end_time_seconds"]) == (330.0, 600.0)
     out = tmp_path / "out" / "job1"
     transcript = json.loads((out / "transcript.json").read_text())["segments"][0]
     assert (transcript["start_time_ms"], transcript["words"][0]["start_time_ms"]) == (340_000, 340_000)
