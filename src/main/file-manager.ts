@@ -4,8 +4,9 @@ import { app } from 'electron'
 import { promisify } from 'util'
 const execFileAsync = promisify(execFile)
 import { constants, existsSync, lstatSync, mkdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'fs'
-import { open, readdir } from 'fs/promises'
+import { open, readdir, rm } from 'fs/promises'
 import { isAbsolute, join, relative, sep } from 'path'
+import { fileURLToPath } from 'url'
 import { resolveBinary } from './tools'
 import { parseJobOutput, type JobOutput } from '../shared/job-output'
 import { readRunRecord } from './run-history'
@@ -147,6 +148,16 @@ async function getVideoDurationSeconds(videoPath: string): Promise<number | null
   }
 }
 
+function thumbnailDirectory(): string {
+  return join(app.getPath('userData'), 'thumbnails')
+}
+
+/** The cached thumbnail for a video file at a seek time; the name changes whenever the file does. */
+function thumbnailFile(source: string, stat: { dev: number; ino: number; size: number; mtimeMs: number }, seekSeconds?: number): string {
+  const identity = `${source}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${seekSeconds ?? 'middle'}`
+  return join(thumbnailDirectory(), `${createHash('sha256').update(identity).digest('hex')}.jpg`)
+}
+
 /**
  * Generate a thumbnail for a video clip using ffmpeg.
  * Seeks to the middle of the clip for a representative frame.
@@ -163,11 +174,10 @@ export async function generateThumbnail(videoPath: string, seekSeconds?: number)
     if (!sourceStat.isFile()) return null
   } catch { return null }
 
-  const thumbnailDir = join(app.getPath('userData'), 'thumbnails')
+  const thumbnailDir = thumbnailDirectory()
   mkdirSync(thumbnailDir, { recursive: true, mode: 0o700 })
   if (!lstatSync(thumbnailDir).isDirectory() || lstatSync(thumbnailDir).isSymbolicLink()) return null
-  const identity = `${source}:${sourceStat.dev}:${sourceStat.ino}:${sourceStat.size}:${sourceStat.mtimeMs}:${seekSeconds ?? 'middle'}`
-  const thumbPath = join(thumbnailDir, `${createHash('sha256').update(identity).digest('hex')}.jpg`)
+  const thumbPath = thumbnailFile(source, sourceStat, seekSeconds)
   if (existsSync(thumbPath) && lstatSync(thumbPath).isFile() && !lstatSync(thumbPath).isSymbolicLink()) return thumbPath
   const tempPath = join(thumbnailDir, `${randomUUID()}.jpg`)
 
@@ -212,4 +222,59 @@ export async function generateThumbnail(videoPath: string, seekSeconds?: number)
     try { unlinkSync(tempPath) } catch { /* No partial thumbnail remains. */ }
   }
   return null
+}
+
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Bytes in a directory's regular files; links are counted but never followed. */
+async function directorySize(dir: string): Promise<number> {
+  let total = 0
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) total += await directorySize(path)
+    else total += lstatSync(path).size
+  }
+  return total
+}
+
+/**
+ * Removes everything a finished run left on disk: its folder in the output
+ * directory (clips, transcript, plan and results), the cached thumbnails of
+ * its clips, and any leftover work files and engine log. Clips copied into an
+ * automation live in that automation's own folder and are kept.
+ * Returns the bytes freed.
+ */
+export async function deleteRun(baseDir: string, jobId: string): Promise<number> {
+  if (!RUN_ID.test(jobId)) throw new Error('Invalid run identifier')
+  const runDir = join(baseDir, jobId)
+  const entry = lstatSync(runDir)
+  if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('Invalid run folder')
+  const rel = relative(realpathSync(baseDir), realpathSync(runDir))
+  if (rel !== jobId) throw new Error('Run is outside the output folder')
+
+  // Thumbnail names depend on each clip file, so work them out before deleting.
+  // Clip cards ask for the middle frame by duration; posts ask without one.
+  const thumbnails: string[] = []
+  const output = await getJobOutput(runDir, baseDir)
+  for (const clip of output?.clips ?? []) {
+    try {
+      const source = realpathSync(fileURLToPath(clip.s3_url))
+      const inRun = relative(realpathSync(runDir), source)
+      if (isAbsolute(inRun) || inRun.startsWith('..')) continue
+      const stat = statSync(source)
+      const seeks = clip.duration_ms > 0 ? [(clip.duration_ms / 1000) * 0.5, clip.duration_ms / 2000, undefined] : [undefined]
+      for (const seek of seeks) thumbnails.push(thumbnailFile(source, stat, seek))
+    } catch { /* A clip file that's already gone has no thumbnail to find. */ }
+  }
+
+  const freed = await directorySize(runDir)
+  await rm(runDir, { recursive: true, force: true })
+  for (const path of [
+    ...thumbnails,
+    join(app.getPath('userData'), 'work', jobId),
+    join(app.getPath('logs'), 'engine', `${jobId}.log`)
+  ]) {
+    await rm(path, { recursive: true, force: true }).catch(() => { /* Best effort: the run itself is gone. */ })
+  }
+  return freed
 }

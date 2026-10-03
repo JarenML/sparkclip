@@ -8,6 +8,7 @@ import type { JobOutput } from '../store/use-job-store'
 import { parseJobOutput } from '../../shared/job-output'
 import type { HistoryEntry } from '../../preload/index'
 import { BackLink, ClipList } from '../components/ClipList'
+import { useDeleteRun } from '../components/DeleteRun'
 import { Page } from '../components/ui/Page'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
@@ -25,6 +26,7 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
   const requestId = useRef(0)
   const openRequestId = useRef(0)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
@@ -47,6 +49,12 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
   useEffect(() => {
     load()
   }, [load])
+
+  const onDeleted = useCallback((message: string) => {
+    setOpen(null)
+    void load().then(() => setNotice(message))
+  }, [load])
+  const deleteRun = useDeleteRun(onDeleted, setError)
 
   const filtered = useMemo(() => {
     if (!entries) return []
@@ -79,13 +87,23 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
   }
 
   if (open) {
+    const { entry } = open
     return (
-      <ClipList
-        output={open.output}
-        outputDir={open.entry.outputDir}
-        onNavigate={onNavigate}
-        leading={<BackLink label="Library" onClick={() => setOpen(null)} />}
-      />
+      <>
+        {error && (
+          <Page width="wide" className="pb-0">
+            <Callout tone="danger" onDismiss={() => setError(null)}>{error}</Callout>
+          </Page>
+        )}
+        <ClipList
+          output={open.output}
+          outputDir={entry.outputDir}
+          onNavigate={onNavigate}
+          leading={<BackLink label="Library" onClick={() => setOpen(null)} />}
+          onDelete={() => deleteRun.ask({ jobId: entry.jobId, title: entry.videoTitle, clipCount: entry.clipCount })}
+        />
+        {deleteRun.dialog}
+      </>
     )
   }
 
@@ -125,6 +143,11 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
       {error && (
         <Callout tone="danger" className="mt-4" onDismiss={() => setError(null)}>
           {error}
+        </Callout>
+      )}
+      {notice && (
+        <Callout tone="success" className="mt-4" onDismiss={() => setNotice(null)}>
+          {notice}
         </Callout>
       )}
 

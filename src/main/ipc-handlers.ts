@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron'
 import { existsSync, realpathSync } from 'fs'
 import { loadSettings, publicSettings, replaceApiKey, savePublicSettings, type ApiKeyName, type PublicSettings } from './settings-store'
-import { ensureOutputDir, getJobHistory, getJobOutput, generateThumbnail } from './file-manager'
+import { deleteRun, ensureOutputDir, getJobHistory, getJobOutput, generateThumbnail } from './file-manager'
 import {
   getEnginePath,
   getBridgeRunnerPath,
@@ -237,6 +237,15 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   handle('history:list', () => {
     const settings = loadSettings()
     return getJobHistory(settings.outputDirectory, liveJobIds())
+  })
+
+  handle('history:delete', async (_event, jobId: unknown) => {
+    if (typeof jobId !== 'string') throw new Error('Invalid run identifier')
+    if (liveJobIds().has(jobId)) throw new Error('This job is still running. Cancel it before deleting it.')
+    const freedBytes = await deleteRun(loadSettings().outputDirectory, jobId)
+    dismissJob(jobId)
+    logger.info('history.delete', { jobId, freedBytes })
+    return { freedBytes }
   })
 
   handle('history:getJob', (_event, outputDir: string) => {

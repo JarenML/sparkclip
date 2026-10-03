@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clapperboard, Download, FolderOpen, ListChecks, ListPlus, Plus, Send } from 'lucide-react'
+import { ArrowLeft, Check, Clapperboard, Download, FolderOpen, ListChecks, ListPlus, Plus, Send, Trash2 } from 'lucide-react'
 import { basename, cn, errorMessage } from '../lib/utils'
 import { getApi } from '../lib/ipc'
 import { clipFilePath } from '../lib/thumbnails'
@@ -30,6 +30,8 @@ interface ClipListProps {
   onNewClip?: () => void
   /** Lets the post dialog send the user to Accounts to connect a platform. */
   onNavigate?: (page: AppPage) => void
+  /** Deletes this run and its files (after the caller confirms). */
+  onDelete?: () => void
 }
 
 /** Clips the post dialog handles in one go; each is still its own upload and post. */
@@ -40,7 +42,7 @@ function toPostable(clip: ClipArtifact): PostableClip {
   return { path: clipFilePath(clip.s3_url), title: clip.summary || `Clip ${clip.clip_index + 1}`, tags: clip.tags, durationMs: clip.duration_ms }
 }
 
-export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, onNavigate }: ClipListProps): React.JSX.Element {
+export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, onNavigate, onDelete }: ClipListProps): React.JSX.Element {
   const [sort, setSort] = useState<Sort>('score')
   const showScores = useClipViewStore((s) => s.showScores)
   const toggleScores = useClipViewStore((s) => s.toggleScores)
@@ -144,6 +146,11 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
         title={output.source_video_title || 'Untitled video'}
         actions={
           <>
+            {onDelete && (
+              <Button variant="ghost" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={onDelete}>
+                Delete job
+              </Button>
+            )}
             {outputDir && (
               <Button icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={() => getApi().shell.openPath(outputDir)}>
                 Open folder

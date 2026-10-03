@@ -13,7 +13,8 @@ const bundled = buildSync({
       export { useDraftStore } from './src/renderer/store/use-draft-store';
       export { SourcePicker, isValidSourceLink } from './src/renderer/components/SourcePicker';
       export { TrimTimeline } from './src/renderer/components/TrimTimeline';
-      export { framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
+      export { ClipList, framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
+      export { formatBytes } from './src/renderer/lib/utils';
       export { parseJobOutput, starredClips } from './src/shared/job-output';
       export { ScoreBreakdown } from './src/renderer/components/ClipCard';
       export { twitchVodId, kickVod, normalizeVideoSource } from './src/shared/video-source';`,
@@ -283,4 +284,13 @@ test('the save-space switch appears only for Twitch and Kick VODs and shows in R
   assert.match(review('https://www.twitch.tv/videos/12345', true), /480p to plan, each clip in full quality/)
   assert.doesNotMatch(review('https://www.twitch.tv/videos/12345', false), /480p to plan/)
   assert.doesNotMatch(review('https://example.com/video', true), /480p to plan/)
+})
+
+test('a run view offers Delete job only when it can delete, and freed space reads like Explorer', () => {
+  const { ClipList, parseJobOutput, formatBytes } = form.exports
+  const output = parseJobOutput({ source_video_title: 'casino un rato', clips: [] })
+  const view = (props) => renderToStaticMarkup(React.createElement(ClipList, { output, outputDir: 'C:/out/run', ...props }))
+  assert.match(view({ onDelete() {} }), />Delete job</)
+  assert.doesNotMatch(view({}), /Delete job/)
+  assert.deepEqual([285212672, 1503238553, 2048, 12].map(formatBytes), ['272 MB', '1.4 GB', '2 KB', '12 bytes'])
 })
