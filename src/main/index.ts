@@ -14,6 +14,7 @@ import { cancelQueuedJobsForQuit } from './job-manager'
 import { cancelZernioConnect } from './zernio/service'
 import { isAutomationMedia, startAutomationScheduler } from './automations'
 import { handleStreamRequest, STREAM_PROXY_SCHEME } from './stream-proxy'
+import { stopShare } from './lan-share'
 import { REPO_URL } from '../shared/brand'
 
 // Catch crashes anywhere in the main process so we get a log line instead
@@ -260,3 +261,4 @@ app.on('before-quit', () => {
 })
 // A sign-in still waiting for its browser redirect must not hold the loopback port.
 app.on('before-quit', () => cancelZernioConnect())
+app.on('before-quit', () => stopShare())

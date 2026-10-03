@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, Clapperboard, Download, FolderOpen, ListChecks, ListPlus, Plus, Send, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowLeft, Check, Clapperboard, Download, FolderOpen, ListChecks, ListPlus, Plus, Send, Smartphone, Trash2 } from 'lucide-react'
 import { basename, cn, errorMessage } from '../lib/utils'
 import { getApi } from '../lib/ipc'
 import { clipFilePath } from '../lib/thumbnails'
@@ -18,6 +18,7 @@ import { Segmented } from './ui/Segmented'
 import type { Page as AppPage } from './Sidebar'
 import { useClipViewStore } from '../store/use-clip-view-store'
 import { starredClips } from '../../shared/job-output'
+import { ShareDialog } from './ShareDialog'
 
 type Sort = 'score' | 'timeline'
 
@@ -50,6 +51,8 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
   const [exporting, setExporting] = useState(false)
   const [posting, setPosting] = useState<PostableClip[] | null>(null)
   const [bankClips, setBankClips] = useState<number[] | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const closeShare = useCallback(() => setSharing(false), [])
   const [addedToBank, setAddedToBank] = useState(false)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const exportingRef = useRef(false)
@@ -151,6 +154,11 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
                 Delete job
               </Button>
             )}
+            {outputDir && output.clips.length > 0 && (
+              <Button variant="ghost" icon={<Smartphone className="h-3.5 w-3.5" />} onClick={() => setSharing(true)}>
+                View on phone
+              </Button>
+            )}
             {outputDir && (
               <Button icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={() => getApi().shell.openPath(outputDir)}>
                 Open folder
@@ -164,6 +172,7 @@ export function ClipList({ output, outputDir: runDirectory, leading, onNewClip, 
           </>
         }
       />
+      {sharing && outputDir && <ShareDialog outputDir={outputDir} onClose={closeShare} />}
 
       {typeof videoSpeed === 'number' && videoSpeed > 1 && (
         <p className="mt-3 text-xs text-ink-muted">All clips exported at {videoSpeed}× speed · Original voice pitch</p>
