@@ -211,6 +211,19 @@ test('per-criterion scores are kept and validated', () => {
   assert.match(renderToStaticMarkup(React.createElement(ScoreBreakdown, { scores: null })), /not saved for this run/)
 })
 
+test('stream tags keep known labels, drop repeats and cap at two; older runs have none', () => {
+  const { parseJobOutput } = form.exports
+  const base = { s3_url: 'file:///clip.mp4', duration_ms: 30000, start_time_ms: 0, end_time_ms: 30000, virality_score: 0.8 }
+  const output = parseJobOutput({ clips: [
+    { ...base, clip_index: 0, stream_tags: ['gaming', 'rage'] },
+    { ...base, clip_index: 1, stream_tags: ['funny', 'funny', 'podcast', 'hype', 'fail'] },
+    { ...base, clip_index: 2, stream_tags: ['toString', 7, null] },
+    { ...base, clip_index: 3, stream_tags: 'gaming' },
+    { ...base, clip_index: 4 }
+  ] })
+  assert.deepEqual(output.clips.map((clip) => clip.stream_tags), [['gaming', 'rage'], ['funny', 'hype'], [], [], []])
+})
+
 test('the three highest virality scores are starred, ties going to the earlier clip', () => {
   const { starredClips } = form.exports
   const clips = [0.61, 0.83, 0.7, 0.83, 0.9, 0.7].map((virality_score, clip_index) => ({ clip_index, virality_score }))

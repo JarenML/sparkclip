@@ -55,6 +55,8 @@ class ClipPlanSegment:
     tags: list[str] = field(default_factory=list)
     # Punch words to highlight in captions, as spoken in the clip.
     emphasis_words: list[str] = field(default_factory=list)
+    # STREAM_TAGS labels; empty unless the planner classified the video as a stream.
+    stream_tags: list[str] = field(default_factory=list)
     # Filled in after rendering, like layout_type (see RenderResult.render_fallback).
     render_fallback: Optional[str] = None
     # Longform only (source ms): tangents cut out of the clip, chapter starts
@@ -98,6 +100,27 @@ DEFAULT_PRICING = {"input": 2.00e-6, "output": 12.0e-6}
 # The five rubric dimensions the model scores each clip on (0-10 each).
 # virality_score is computed from these rather than trusting model arithmetic.
 RUBRIC_DIMENSIONS = ("hook", "standalone", "arc", "quotability", "ending")
+
+# Labels for clips cut from a livestream: what the stream is doing and what
+# kind of moment the clip is (mirrors STREAM_TAGS in src/shared/job-output.ts).
+STREAM_TAGS = (
+    "gaming", "just_chatting", "irl", "reaction",
+    "drama", "rage", "hype", "wholesome", "funny", "fail",
+)
+MAX_STREAM_TAGS = 2
+
+STREAM_TAGS_GUIDE = """"stream_tags" labels each clip for the creator's clip library. Only when you classified the video as a Stream, give every clip 1-2 of these labels, the best fit first. For any other video, return an empty array.
+- gaming: playing a video game
+- just_chatting: talking with chat or guests, not playing
+- irl: out in the real world (streets, events, travel)
+- reaction: watching and reacting to videos, clips or other content
+- drama: conflict, callouts, gossip, controversy
+- rage: anger, frustration, losing it
+- hype: wins, clutch plays, big moments, excitement
+- wholesome: heartwarming, grateful, kind or emotional in a good way
+- funny: jokes, dumb moments, banter, absurdity
+- fail: mistakes, losses, things going wrong
+A useful pair is usually what the stream is doing plus what kind of moment it is, for example gaming + rage. Use only these exact lowercase values; they are never translated."""
 
 # Languages clip titles can be written in (mirrors TITLE_LANGUAGES in
 # src/shared/job-contract.ts). "auto" writes them in the spoken language.
@@ -147,8 +170,13 @@ CLIP_PLAN_SCHEMA: dict[str, Any] = {
                         "items": {"type": "string"},
                         "description": "2-5 single punch words spoken in the clip, highlighted in captions.",
                     },
+                    "stream_tags": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(STREAM_TAGS)},
+                        "description": "1-2 labels when the video is a livestream; empty for any other video.",
+                    },
                 },
-                "required": ["start_time", "end_time", "summary", "scores", "tags", "emphasis"],
+                "required": ["start_time", "end_time", "summary", "scores", "tags", "emphasis", "stream_tags"],
                 "additionalProperties": False,
             },
         },
@@ -702,6 +730,7 @@ Before selecting clips, classify the video content type:
 - Vlog/Personal: Prioritize emotional peaks, story climaxes, humor, raw authenticity
 - Presentation/Talk: Prioritize key insights, powerful analogies, audience-reaction moments
 - Debate/Discussion: Prioritize clashes, counterarguments, concession moments
+- Stream (a livestream or its VOD: gaming, just chatting, IRL, reactions): Prioritize raw reactions, high stakes, conflict, interaction and chaos (see STREAMS below)
 
 Include your content type classification in the "insights" field.
 
@@ -745,6 +774,31 @@ Prioritize clips whose opening matches one of these proven hook patterns:
 - Contain the same core point as another selected clip. Each clip must cover a distinct idea.
 - Feature the speaker trailing off, losing their train of thought, or being interrupted without resolution.
 
+## STREAMS
+
+If you classify the video as a Stream, what goes viral differs from a podcast or tutorial. Treat these as strong clip material and score them accordingly:
+- EXTREME REACTIONS: shouting, uncontrollable laughter, rage, shock, disbelief. The streamer's reaction is the content, often more than what caused it.
+- HIGH STAKES: bets, challenges, big wins or losses, large donations, "if I lose, I'll...". Viewers stay to see how it ends.
+- CONFLICT: arguments with other streamers, guests or chat, callouts, controversial statements.
+- PERSONALITY: catchphrases, nicknames and running jokes the streamer is known for.
+- INTERACTION: collabs, guests, calls, and strangers met on IRL streams; chemistry or clashes between strong personalities.
+- SPONTANEOUS HUMOR AND FAILS: absurd mistakes and dumb moments nobody planned.
+
+How the rubric applies to a stream:
+- HOOK: the reaction, the stakes or the conflict is clear within the first seconds. Start as close to the moment as its setup allows.
+- STANDALONE: someone who has never watched this streamer understands what happened and why it matters.
+- ARC: the setup (what is at stake, what just happened) and the payoff (the reaction or outcome) are both inside the clip.
+- QUOTABILITY: a moment people would share or repeat: a line, a catchphrase, or the reaction itself. It does not need to be a polished statement.
+- ENDING: end once the reaction has played out, not in the middle of it.
+
+During a reaction, shouting, overlapping voices, broken sentences and stammering are not flaws. The anti-patterns about filler and trailing off apply to dead stretches where nothing happens, not to a streamer losing it over a moment.
+
+The transcript only captures speech and a few audio events, not the game or what is on screen. Read the streamer's words and reactions to tell what happened.
+
+## STREAM TAGS
+
+{STREAM_TAGS_GUIDE}
+
 ## CLIP DIVERSITY RULES
 
 - SPREAD: Distribute clips across the full video timeline. Do not cluster multiple clips from the same section.
@@ -781,7 +835,8 @@ Return exactly {clip_count} clips as JSON:
       "summary": "<2-7 word title>",
       "scores": {{"hook": <0-10>, "standalone": <0-10>, "arc": <0-10>, "quotability": <0-10>, "ending": <0-10>}},
       "tags": ["tag1", "tag2"],
-      "emphasis": ["word1", "word2"]
+      "emphasis": ["word1", "word2"],
+      "stream_tags": [<1-2 stream labels for a Stream, otherwise none>]
     }}
   ]
 }}
@@ -819,6 +874,7 @@ Each transcript line is `[start - end] (speaker) text (audio events)`, with time
 - SUSTAINED INTEREST. Prefer stretches with a clear progression: setup, development, payoff. Several beats of insight or story, not one idea stretched thin.
 - CLEAN ENDING. End on a conclusion, a takeaway or a punchline, at the end of a sentence. Never end mid-thought or on "anyway, moving on".
 - DISTINCT EPISODES. Each covers a different topic. Episodes never overlap by more than 5 seconds.
+- STREAMS. In a livestream, raw reactions, high stakes, conflict and interaction with chat or guests hold viewers as much as insight does. Shouting or broken sentences during a reaction are not flaws.
 
 ## SKIPS (TIGHTENING THE EDIT)
 
@@ -851,6 +907,10 @@ Score each episode 0-10 on these keys (be calibrated; reserve 8-10 for exception
 - Language: {self._title_language_rule()}
 - "emphasis": 2-5 single key words spoken in the episode (names, numbers, key terms).
 
+## STREAM TAGS
+
+{STREAM_TAGS_GUIDE}
+
 ## OUTPUT
 
 Return JSON with "insights" and "clips" (up to {clip_count}, best first). Times are in SECONDS taken from the transcript timestamps. Start each clip at the beginning of a transcript line and end it at the end of one. Clips outside {min_duration}-{max_duration} seconds are REJECTED."""
@@ -875,7 +935,7 @@ Return JSON with "insights" and "clips". Return at most {clip_count} clips. Each
 {minimum} to {maximum} seconds long, contained within the video's duration, and grounded in
 the timestamps of the sample frames. Prefer intervals with multiple relevant frames.
 Each clip needs start_time and end_time in seconds, a factual 2-7 word summary, tags,
-an empty emphasis array, and scores with hook, standalone, arc, quotability, and ending
+an empty emphasis array, an empty stream_tags array, and scores with hook, standalone, arc, quotability, and ending
 values from 0 to 10. Treat quotability as shareability of the visible moment, not speech.
 Do not overlap clips by more than 5 seconds.
 {self._title_language_rule(visual_only=True)}"""
@@ -1333,6 +1393,7 @@ Do not overlap clips by more than 5 seconds.
                         [w for w in clip.get("emphasis", []) if isinstance(w, str)][:5]
                         if transcript else []
                     ),
+                    stream_tags=self._stream_tags(clip),
                 )
                 if getattr(self, "_current_longform", False):
                     segment.skip_ranges_ms = self._clean_skips(
@@ -1470,6 +1531,18 @@ Do not overlap clips by more than 5 seconds.
                 if math.isfinite(value):
                     result[dim] = round(min(10.0, max(0.0, value)), 1)
         return result
+
+    @staticmethod
+    def _stream_tags(clip: dict) -> list[str]:
+        """Known stream labels in the model's order, without repeats, at most MAX_STREAM_TAGS."""
+        raw = clip.get("stream_tags")
+        tags: list[str] = []
+        for tag in raw if isinstance(raw, list) else []:
+            if isinstance(tag, str):
+                tag = tag.strip().lower()
+                if tag in STREAM_TAGS and tag not in tags:
+                    tags.append(tag)
+        return tags[:MAX_STREAM_TAGS]
 
     @classmethod
     def _score_clip(cls, clip: dict) -> float:

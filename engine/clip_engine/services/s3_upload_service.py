@@ -47,6 +47,8 @@ class ClipArtifact:
     # Per-dimension rubric scores (hook, standalone, arc, quotability, ending).
     scores: Optional[dict] = None
     tags: list[str] = None
+    # Stream labels (STREAM_TAGS in intelligence_planner); empty for other videos.
+    stream_tags: list[str] = None
     # Set when the smart render failed and a letterbox fallback produced the
     # clip ("letterbox" keeps pacing cuts, "letterbox_natural" doesn't).
     render_fallback: Optional[str] = None

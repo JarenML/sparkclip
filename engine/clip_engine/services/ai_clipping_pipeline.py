@@ -579,6 +579,7 @@ class AIClippingPipeline:
                         layout_type=segment.layout_type,
                         summary=segment.summary,
                         tags=segment.tags or [],
+                        stream_tags=segment.stream_tags or [],
                         render_fallback=segment.render_fallback,
                         description=segment.description,
                         chapters=self._chapter_dicts(segment),
@@ -728,6 +729,7 @@ class AIClippingPipeline:
                         "render_fallback": clip.render_fallback,
                         "summary": clip.summary,
                         "tags": clip.tags or [],
+                        "stream_tags": clip.stream_tags or [],
                         "description": clip.description,
                         "chapters": clip.chapters,
                     }
@@ -881,6 +883,7 @@ class AIClippingPipeline:
                 layout_type=segment.layout_type,
                 summary=segment.summary,
                 tags=segment.tags or [],
+                stream_tags=segment.stream_tags or [],
                 render_fallback=segment.render_fallback,
                 description=segment.description,
                 chapters=self._chapter_dicts(segment),

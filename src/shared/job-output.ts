@@ -13,6 +13,35 @@ export type ClipScores = Record<RubricKey, number>
 /** Scores under this are highlighted in the per-criterion breakdown. */
 export const RUBRIC_PASS_SCORE = 7
 
+/** Labels the planner gives clips cut from a livestream (mirrors STREAM_TAGS in the engine's planner). */
+export const STREAM_TAGS = {
+  gaming: 'Gaming',
+  just_chatting: 'Just Chatting',
+  irl: 'IRL',
+  reaction: 'Reaction',
+  drama: 'Drama',
+  rage: 'Rage',
+  hype: 'Hype',
+  wholesome: 'Wholesome',
+  funny: 'Funny',
+  fail: 'Fail'
+} as const
+
+export type StreamTag = keyof typeof STREAM_TAGS
+
+const MAX_STREAM_TAGS = 2
+
+function streamTags(value: unknown): StreamTag[] {
+  if (!Array.isArray(value)) return []
+  const tags: StreamTag[] = []
+  for (const tag of value) {
+    if (typeof tag === 'string' && Object.prototype.hasOwnProperty.call(STREAM_TAGS, tag) && !tags.includes(tag as StreamTag)) {
+      tags.push(tag as StreamTag)
+    }
+  }
+  return tags.slice(0, MAX_STREAM_TAGS)
+}
+
 /** How many of a run's highest-scoring clips get a star. */
 export const STARRED_CLIP_COUNT = 3
 
@@ -34,6 +63,8 @@ export interface ClipArtifact {
   layout_type: string
   summary: string | null
   tags: string[]
+  /** Stream labels; empty when the video isn't a stream or the run predates them. */
+  stream_tags: StreamTag[]
   /** Set when smart framing failed and a letterbox fallback produced the clip. */
   render_fallback: string | null
 }
@@ -206,6 +237,7 @@ export function parseJobOutput(value: unknown): JobOutput | null {
       layout_type: typeof item.layout_type === 'string' && ['talking_head', 'two_shot', 'screen_cam', 'screen', 'fit', 'center_crop'].includes(item.layout_type) ? item.layout_type : '',
       summary: boundedText(item.summary, 2048),
       tags: Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 50).map((tag) => tag.slice(0, 64)) : [],
+      stream_tags: streamTags(item.stream_tags),
       render_fallback: boundedText(item.render_fallback, 256)
     })
   }
