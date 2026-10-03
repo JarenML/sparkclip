@@ -15,6 +15,7 @@ const bundled = buildSync({
       export { TrimTimeline } from './src/renderer/components/TrimTimeline';
       export { ClipList, framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
       export { formatBytes } from './src/renderer/lib/utils';
+      export { qrDataUrl } from './src/renderer/components/ShareDialog';
       export { parseJobOutput, starredClips } from './src/shared/job-output';
       export { ScoreBreakdown } from './src/renderer/components/ClipCard';
       export { twitchVodId, kickVod, normalizeVideoSource } from './src/shared/video-source';`,
@@ -293,4 +294,15 @@ test('a run view offers Delete job only when it can delete, and freed space read
   assert.match(view({ onDelete() {} }), />Delete job</)
   assert.doesNotMatch(view({}), /Delete job/)
   assert.deepEqual([285212672, 1503238553, 2048, 12].map(formatBytes), ['272 MB', '1.4 GB', '2 KB', '12 bytes'])
+})
+
+test('runs with clips can be opened on a phone through a QR code', () => {
+  const { ClipList, parseJobOutput, qrDataUrl } = form.exports
+  const withClips = parseJobOutput({ source_video_title: 'Stream', clips: [{ clip_index: 0, s3_url: 'file:///C:/out/run/clip_00.mp4', duration_ms: 1000, start_time_ms: 0, end_time_ms: 1000, virality_score: 0.8 }] })
+  const empty = parseJobOutput({ source_video_title: 'Stream', clips: [] })
+  const view = (output, outputDir) => renderToStaticMarkup(React.createElement(ClipList, { output, outputDir }))
+  assert.match(view(withClips, 'C:/out/run'), />View on phone</)
+  assert.doesNotMatch(view(empty, 'C:/out/run'), /View on phone/)
+  const qr = qrDataUrl('http://192.168.1.20:51234/' + 'a'.repeat(32) + '/')
+  assert.match(qr, /^data:image\/svg\+xml;charset=utf-8,%3Csvg/)
 })

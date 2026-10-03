@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron'
 import { existsSync, realpathSync } from 'fs'
 import { loadSettings, publicSettings, replaceApiKey, savePublicSettings, type ApiKeyName, type PublicSettings } from './settings-store'
 import { deleteRun, ensureOutputDir, getJobHistory, getJobOutput, generateThumbnail } from './file-manager'
+import { currentShare, startShare, stopShare } from './lan-share'
 import {
   getEnginePath,
   getBridgeRunnerPath,
@@ -247,6 +248,19 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     logger.info('history.delete', { jobId, freedBytes })
     return { freedBytes }
   })
+
+  handle('share:start', async (_event, outputDir: unknown) => {
+    assertAbsolutePath(outputDir)
+    const library = loadSettings().outputDirectory
+    if (!isWithinDirectory(outputDir, library)) throw new Error('Job is outside the library')
+    const output = await getJobOutput(outputDir, library)
+    if (!output) throw new Error('This run’s clips are unavailable.')
+    const share = await startShare(outputDir, output)
+    logger.info('share.start', { addresses: share.urls.length })
+    return share
+  })
+  handle('share:stop', () => { stopShare(); return true })
+  handle('share:status', () => currentShare())
 
   handle('history:getJob', (_event, outputDir: string) => {
     assertAbsolutePath(outputDir)
