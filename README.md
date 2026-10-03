@@ -37,6 +37,8 @@
                                word timings    best moments      one file per clip
 ```
 
+While the audio is transcribed, SparkClip also listens to it on your computer for laughter, crying, screaming, applause and loud outbursts (with Google's YAMNet model and the audio's loudness) and marks them in the transcript, so the planner can find reactions that have no words. Nothing extra leaves your computer for this.
+
 Every run gets its own folder. The **Library** shows completed clips with virality scores, timecodes and tags. **Jobs** shows what is running or queued right now (up to two clipping runs go at once; more wait in a queue) and every earlier run, including completed, failed, cancelled and interrupted jobs; completed runs open their clips, and failed runs from this session can run again. Older runs without a saved status appear as unfinished. You can optionally connect social accounts through Zernio to publish or schedule a selected clip.
 
 In **Create → Clips**, choose **Quality**, **Economy**, or **Advanced**. Advanced offers searchable OpenRouter model pickers for transcription and clip planning, with model IDs, planning prices and compatibility notes. Both selections are required and appear in Review. Advanced retries the selected models without automatically switching models. Transcription must provide word timestamps; planning must support structured output. See [model selection and transcription](docs/transcription.md).

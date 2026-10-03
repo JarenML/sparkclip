@@ -19,9 +19,12 @@ sys.modules[spec.name] = stt
 with patch.dict(sys.modules, {
     "clip_engine.config": types.SimpleNamespace(get_settings=lambda: types.SimpleNamespace(
         openrouter_api_key="test-openrouter", transcription_diarize=True,
-        transcription_model="microsoft/mai-transcribe-2")),
+        transcription_model="microsoft/mai-transcribe-2", audio_events_enabled=False)),
     "clip_engine.services.media_process": types.SimpleNamespace(
         MEDIA_INPUT_OPTIONS=[], run_media=lambda *args, **kwargs: None),
+    # Audio events have their own tests in engine/tests/test_audio_events.py.
+    "clip_engine.services.audio_events": types.SimpleNamespace(
+        attach_audio_events=lambda segments, events: None, detect_audio_events=lambda *args: []),
 }):
     spec.loader.exec_module(stt)
 
