@@ -205,3 +205,35 @@ def test_pipeline_reports_partial_download_times_on_the_source_timeline(monkeypa
     )
     manifest = json.loads((out / "job_output.json").read_text())
     assert manifest["clips"][0]["start_time_ms"] == 340_000
+
+
+def test_a_start_past_the_end_of_the_video_fails_clearly(monkeypatch, tmp_path):
+    settings = pipeline_module.get_settings()
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(settings, "local_output_dir", str(tmp_path / "out"))
+    monkeypatch.setattr(settings.__class__, "temp_directory", property(lambda self: str(tmp_path / "work")))
+    monkeypatch.setattr(RenderingService, "_verify_ffmpeg", lambda self: None)
+    pipeline = AIClippingPipeline()
+    pipeline.local_mode = True
+
+    async def download(url, output_dir, section=None):
+        # Kick said 38:18, but the playable VOD ends at 37:04: only its last
+        # 18 s overlap the padded range, starting at 2205.6 s.
+        meta = SimpleNamespace(title="Stream", duration_seconds=18.3, width=1920, height=1080)
+        return SimpleNamespace(
+            video_path=str(tmp_path / "source.mp4"), metadata=meta, file_size_bytes=1,
+            timeline_offset_seconds=2205.568, source_duration_seconds=2223.853,
+        )
+
+    async def transcribe(**kwargs):
+        raise AssertionError("nothing to transcribe")
+
+    monkeypatch.setattr(pipeline.video_downloader, "download_video", download)
+    monkeypatch.setattr(pipeline.transcription_service, "transcribe", transcribe)
+    monkeypatch.setattr(pipeline, "_update_progress", lambda *args, **kwargs: None)
+    result = asyncio.run(pipeline.process_video(ClippingJobRequest(
+        video_url="https://kick.com/c/videos/x", job_id="job1", start_time_seconds=2238.0, end_time_seconds=2298.0,
+    )))
+    assert result.status == JobStatus.FAILED
+    assert result.error == "Trim start is past the end of the video"
+    assert result.failure_code == "source.trim_past_end"

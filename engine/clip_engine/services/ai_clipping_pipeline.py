@@ -25,7 +25,7 @@ from typing import Any, Callable, Optional
 
 from clip_engine.config import CaptionStyle, LayoutStyle, get_settings, is_longform, resolve_clip_duration_bounds
 from clip_engine.services.video_speed import validate_video_speed
-from clip_engine.error_policy import safe_failure_code, safe_processing_error
+from clip_engine.error_policy import TRIM_PAST_END, safe_failure_code, safe_processing_error
 from clip_engine.services.intelligence_planner import (
     ClipPlanResponse,
     ClipPlanSegment,
@@ -263,6 +263,8 @@ class AIClippingPipeline:
                 )
                 effective_end_time = video_duration
                 request.end_time_seconds = effective_end_time
+            if request.start_time_seconds is not None and request.start_time_seconds >= video_duration:
+                raise RuntimeError(TRIM_PAST_END)
 
             capture_memory("after_download")
 

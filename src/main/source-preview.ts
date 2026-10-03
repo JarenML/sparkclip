@@ -1,5 +1,5 @@
 import { kickVod, twitchVodId, youtubeId, type SourcePreviewInfo } from '../shared/video-source'
-import { createStreamSession } from './stream-proxy'
+import { createStreamSession, isStreamHost } from './stream-proxy'
 
 /**
  * Title, duration and thumbnail for a YouTube, Twitch or Kick link, read from
@@ -17,6 +17,7 @@ const REQUEST_TIMEOUT_MS = 8000
 const MAX_JSON_BYTES = 2 * 1024 * 1024
 const MAX_PAGE_BYTES = 4 * 1024 * 1024
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024
+const MAX_PLAYLIST_BYTES = 4 * 1024 * 1024
 const CACHE_TTL_MS = 10 * 60 * 1000
 // Kick's Cloudflare rejects a full Chrome user agent from a non-browser TLS
 // client; the generic token works for every endpoint used here.
@@ -131,6 +132,42 @@ function kickStartMillis(value: unknown): number | null {
   return Number.isNaN(ms) ? null : ms
 }
 
+/** Sum of a finished media playlist's #EXTINF durations, or null if it isn't one. */
+export function playlistSeconds(playlist: string): number | null {
+  if (!/^#EXT-X-ENDLIST\s*$/m.test(playlist)) return null
+  let total = 0
+  for (const match of playlist.matchAll(/^#EXTINF:([^,\r\n]*)/gm)) {
+    const value = Number(match[1])
+    if (!Number.isFinite(value) || value <= 0) return null
+    total += value
+  }
+  return total > 0 ? Math.round(total * 1000) / 1000 : null
+}
+
+/**
+ * The playable length of a Kick VOD: its segments added up. Kick's API
+ * reports the broadcast's wall-clock length, which also counts time the
+ * stream was down, so after a restart it runs past the end of the video.
+ * Every variant has the same segments, so the first one is enough.
+ */
+async function hlsSeconds(fetchImpl: FetchLike, masterUrl: string): Promise<number | null> {
+  const headers = { Referer: 'https://kick.com/', Origin: 'https://kick.com' }
+  const read = async (url: string): Promise<string> =>
+    new TextDecoder().decode(await readCapped(await request(fetchImpl, url, { headers }), MAX_PLAYLIST_BYTES))
+  try {
+    const master = await read(masterUrl)
+    if (/^#EXTINF:/m.test(master)) return playlistSeconds(master)
+    const lines = master.split(/\r?\n/).map((line) => line.trim())
+    const tag = lines.findIndex((line) => line.startsWith('#EXT-X-STREAM-INF'))
+    const uri = tag < 0 ? undefined : lines.slice(tag + 1).find((line) => line && !line.startsWith('#'))
+    if (!uri) return null
+    const variant = new URL(uri, masterUrl).href
+    return isStreamHost(variant) ? playlistSeconds(await read(variant)) : null
+  } catch {
+    return null
+  }
+}
+
 async function kickPreview(fetchImpl: FetchLike, channel: string, id: string): Promise<SourcePreviewInfo> {
   // Current links carry a UUIDv7 whose prefix is the VOD's start time, which
   // the video API doesn't know: find it in the channel's recent VODs instead.
@@ -157,13 +194,18 @@ async function kickPreview(fetchImpl: FetchLike, channel: string, id: string): P
   }
   const playback = typeof source === 'string' ? createStreamSession(source) : null
   const thumbnail = field(stream, 'thumbnail')
+  const [playable, image] = await Promise.all([
+    typeof source === 'string' && isStreamHost(source) ? hlsSeconds(fetchImpl, source) : null,
+    // A URL on the video API, { src } on the channel listing.
+    fetchThumbnail(fetchImpl, typeof thumbnail === 'string' ? thumbnail : field(thumbnail, 'src'))
+  ])
   return {
     title: text(field(stream, 'session_title')),
     channel: text(field(stream, 'channel', 'slug'), 80) ?? channel,
-    // Kick reports milliseconds.
-    durationSeconds: seconds(field(stream, 'duration'), 1000),
-    // A URL on the video API, { src } on the channel listing.
-    thumbnail: await fetchThumbnail(fetchImpl, typeof thumbnail === 'string' ? thumbnail : field(thumbnail, 'src')),
+    // The playable length matches the trim timeline the engine uses; Kick's
+    // own figure (milliseconds) is the fallback.
+    durationSeconds: playable ?? seconds(field(stream, 'duration'), 1000),
+    thumbnail: image,
     stream: playback ? { kind: 'hls', url: playback } : null
   }
 }
