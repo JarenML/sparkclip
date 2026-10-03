@@ -180,6 +180,7 @@ test('the native picker authorizes media and shell opening rejects aliased appli
       },
       './settings-store': { loadSettings: () => ({ outputDirectory: library }) },
       './file-manager': {},
+      './lan-share': {},
       './run-history': runHistory,
       './pipeline-runner': {},
       './job-manager': { initJobManager() {} },

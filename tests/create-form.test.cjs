@@ -16,6 +16,7 @@ const bundled = buildSync({
       export { ClipList, framingProblem, sourceAnalysisNotice } from './src/renderer/components/ClipList';
       export { formatBytes } from './src/renderer/lib/utils';
       export { jobInfoSections, rangeLabel } from './src/renderer/components/JobInfoDialog';
+      export { qrDataUrl } from './src/renderer/components/ShareDialog';
       export { parseJobOutput, starredClips } from './src/shared/job-output';
       export { ScoreBreakdown } from './src/renderer/components/ClipCard';
       export { twitchVodId, kickVod, normalizeVideoSource } from './src/shared/video-source';`,
@@ -332,4 +333,15 @@ test('job details show the pasted link, the clipped range and the settings, and 
   const failed = jobInfoSections({ ...entry, status: 'failed', errorMessage: 'Kick VOD unavailable', totalCostUsd: null }, null)
   assert.deepEqual(failed.map((section) => section.title), ['Source', 'Run'])
   assert.ok(failed[1].rows.some((row) => row.label === 'Error' && row.value === 'Kick VOD unavailable'))
+})
+
+test('runs with clips can be opened on a phone through a QR code', () => {
+  const { ClipList, parseJobOutput, qrDataUrl } = form.exports
+  const withClips = parseJobOutput({ source_video_title: 'Stream', clips: [{ clip_index: 0, s3_url: 'file:///C:/out/run/clip_00.mp4', duration_ms: 1000, start_time_ms: 0, end_time_ms: 1000, virality_score: 0.8 }] })
+  const empty = parseJobOutput({ source_video_title: 'Stream', clips: [] })
+  const view = (output, outputDir) => renderToStaticMarkup(React.createElement(ClipList, { output, outputDir }))
+  assert.match(view(withClips, 'C:/out/run'), />View on phone</)
+  assert.doesNotMatch(view(empty, 'C:/out/run'), /View on phone/)
+  const qr = qrDataUrl('http://192.168.1.20:51234/' + 'a'.repeat(32) + '/')
+  assert.match(qr, /^data:image\/svg\+xml;charset=utf-8,%3Csvg/)
 })

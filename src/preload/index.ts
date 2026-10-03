@@ -15,6 +15,7 @@ import type { Automation, AutomationUpdate, AutomationTikTokReview, AutomationTi
 import type { OpenRouterCatalog } from '../shared/openrouter-models'
 import type { UpdateState } from '../shared/updates'
 import type { SourcePreviewInfo } from '../shared/video-source'
+import type { LanShare } from '../shared/lan-share'
 
 export interface ClipSettings {
   openrouterConfigured: boolean
@@ -130,6 +131,13 @@ export interface BridgeClipAPI {
     /** Permanently delete a finished run's folder and everything cached for it. */
     delete: (jobId: string) => Promise<{ freedBytes: number }>
   }
+  share: {
+    /** Serve a run's clips to phones on this network; replaces any other share. */
+    start: (outputDir: string) => Promise<LanShare>
+    stop: () => Promise<boolean>
+    /** The run being shared, if any. */
+    status: () => Promise<LanShare | null>
+  }
   thumbnails: {
     generate: (videoPath: string, seekSeconds?: number) => Promise<string | null>
   }
@@ -242,6 +250,11 @@ const api: BridgeClipAPI = {
     list: () => ipcRenderer.invoke('history:list'),
     getJob: (outputDir) => ipcRenderer.invoke('history:getJob', outputDir),
     delete: (jobId) => ipcRenderer.invoke('history:delete', jobId)
+  },
+  share: {
+    start: (outputDir) => ipcRenderer.invoke('share:start', outputDir),
+    stop: () => ipcRenderer.invoke('share:stop'),
+    status: () => ipcRenderer.invoke('share:status')
   },
   thumbnails: {
     generate: (videoPath, seekSeconds) => ipcRenderer.invoke('thumbnails:generate', videoPath, seekSeconds)
