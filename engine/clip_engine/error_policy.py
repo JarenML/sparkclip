@@ -1,6 +1,7 @@
 """Stable outward-facing job errors without exception details or source URLs."""
 
 import errno
+import socket
 
 TWITCH_ERRORS = {
     "twitch_unsupported": "Unsupported Twitch source",
@@ -16,7 +17,13 @@ KICK_ERRORS = {
     "kick_unavailable": "Kick VOD unavailable",
 }
 
-VOD_ERRORS = {**TWITCH_ERRORS, **KICK_ERRORS}
+# The computer couldn't reach the video service at all (offline, DNS, VPN or
+# firewall), as opposed to the service refusing or missing the video.
+NETWORK_ERRORS = {
+    "network_unreachable": "Could not connect to the video service",
+}
+
+VOD_ERRORS = {**TWITCH_ERRORS, **KICK_ERRORS, **NETWORK_ERRORS}
 
 # The job's start time lies after the downloaded video ends (for example past
 # the playable end of a VOD whose platform reports a longer length).
@@ -24,6 +31,11 @@ TRIM_PAST_END = "Trim start is past the end of the video"
 
 DISK_FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
 DISK_FULL_MARKERS = ("no space left on device", "disk quota exceeded")
+UNREACHABLE_MARKERS = (
+    "getaddrinfo failed", "failed to resolve", "name or service not known",
+    "temporary failure in name resolution", "nodename nor servname", "no address associated with hostname",
+    "network is unreachable", "no route to host", "connection refused",
+)
 
 
 def is_disk_full(error: BaseException) -> bool:
@@ -39,6 +51,20 @@ def is_disk_full(error: BaseException) -> bool:
         if isinstance(current, OSError) and current.errno in DISK_FULL_ERRNOS:
             return True
         if any(marker in str(current).lower() for marker in DISK_FULL_MARKERS):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def is_unreachable(error: BaseException) -> bool:
+    """True when the error, or one it was raised from, means the host couldn't be reached."""
+    seen = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, socket.gaierror):
+            return True
+        if any(marker in str(current).lower() for marker in UNREACHABLE_MARKERS):
             return True
         current = current.__cause__ or current.__context__
     return False
