@@ -109,6 +109,8 @@ STREAM_TAGS = (
 )
 MAX_STREAM_TAGS = 2
 
+AUDIO_EVENTS_GUIDE = """tags at the end of a line come from listening to the audio, not from the words: (laughter), (crying), (screaming), (applause), and (loud outburst) where the audio is far louder than usual for this video while someone speaks, such as shouting or a hype moment. ", strong" marks a clear detection. They are automatic and can come from game audio, alerts, music or donation messages read aloud, and not every reaction gets one. When the words around a tag show the reaction (a punchline before laughter, bad news before shouting), treat it as strong evidence that the moment landed: weigh it heavily and include the setup that caused it. A tag the words don't support is weak evidence."""
+
 STREAM_TAGS_GUIDE = """"stream_tags" labels each clip for the creator's clip library. Only when you classified the video as a Stream, give every clip 1-2 of these labels, the best fit first. For any other video, return an empty array.
 - gaming: playing a video game
 - just_chatting: talking with chat or guests, not playing
@@ -738,7 +740,7 @@ Include your content type classification in the "insights" field.
 
 Each transcript line is `[start - end] (speaker) text (audio events)`, with times in seconds.
 - Speaker labels (S1, S2, ...) mark who is talking. Back-and-forth exchanges, pushback, and one person reacting to another are strong clip material — but a clip must still make sense without knowing who the speakers are.
-- Audio events such as (laughter) or (applause) are real reactions captured in the audio. They are strong evidence that a moment landed; weigh them heavily, and make sure the clip includes the setup that caused the reaction.
+- Audio events: {AUDIO_EVENTS_GUIDE}
 
 ## EVALUATION RUBRIC
 
@@ -865,7 +867,9 @@ Classify the source first (podcast/interview, tutorial, talk, vlog, debate, stre
 
 ## TRANSCRIPT FORMAT
 
-Each transcript line is `[start - end] (speaker) text (audio events)`, with times in seconds. Speaker labels (S1, S2, ...) mark turns. Audio events such as (laughter) or (applause) are real reactions and mark moments that landed.
+Each transcript line is `[start - end] (speaker) text (audio events)`, with times in seconds. Speaker labels (S1, S2, ...) mark turns.
+
+Audio events: {AUDIO_EVENTS_GUIDE}
 
 ## WHAT MAKES A GOOD EPISODE
 

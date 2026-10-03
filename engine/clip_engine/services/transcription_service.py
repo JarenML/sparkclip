@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from clip_engine.config import get_settings
+from clip_engine.services.audio_events import attach_audio_events, detect_audio_events
 from clip_engine.services.media_process import MEDIA_INPUT_OPTIONS, run_media
 
 logger = logging.getLogger(__name__)
@@ -480,15 +481,27 @@ class TranscriptionService:
         audio_path = os.path.join(work_dir, "audio_extracted.wav")
         await self._extract_audio_from_video(video_path, audio_path, window_start, window_end)
 
+        # Listen for reactions on this machine while the provider transcribes:
+        # the CPU is idle during those requests, so this costs almost no time.
+        events = (
+            asyncio.ensure_future(asyncio.to_thread(detect_audio_events, audio_path, window_start))
+            if self.settings.audio_events_enabled else None
+        )
         try:
-            return await self.transcribe_audio(
+            result = await self.transcribe_audio(
                 audio_path=audio_path,
                 language=language,
                 translate_to_english=translate_to_english,
                 keyterms=keyterms,
                 timeline_offset_seconds=window_start,
             )
+            if events is not None:
+                attach_audio_events(result.segments, await events)
+            return result
         finally:
+            # Detection reads the WAV: let it finish before the file goes.
+            if events is not None and not events.done():
+                await asyncio.wait([events])
             # Cleanup extracted audio
             if os.path.exists(audio_path):
                 try:

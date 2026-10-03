@@ -188,8 +188,11 @@ bridgeclip/engine/assets/fonts/PlusJakartaSans.ttf
 bridgeclip/engine/assets/fonts/Poppins-Black.ttf
 bridgeclip/engine/assets/fonts/Poppins-ExtraBold.ttf
 bridgeclip/engine/assets/fonts/Poppins-OFL.txt
+bridgeclip/engine/assets/models/YAMNet-LICENSE
 bridgeclip/engine/assets/models/YuNet-LICENSE
 bridgeclip/engine/assets/models/face_detection_yunet_2023mar.onnx
+bridgeclip/engine/assets/models/yamnet.onnx
+bridgeclip/engine/assets/models/yamnet_class_map.csv
 bridgeclip/engine/clip_engine/__init__.py
 bridgeclip/engine/clip_engine/bridge_contract.py
 bridgeclip/engine/clip_engine/config.py
@@ -198,6 +201,7 @@ bridgeclip/engine/clip_engine/logging_safety.py
 bridgeclip/engine/clip_engine/network_policy.py
 bridgeclip/engine/clip_engine/services/__init__.py
 bridgeclip/engine/clip_engine/services/ai_clipping_pipeline.py
+bridgeclip/engine/clip_engine/services/audio_events.py
 bridgeclip/engine/clip_engine/services/caption_generator.py
 bridgeclip/engine/clip_engine/services/clip_editor.py
 bridgeclip/engine/clip_engine/services/intelligence_planner.py

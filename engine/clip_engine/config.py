@@ -666,6 +666,9 @@ class Settings(BaseSettings):
     planner_input_price: Optional[float] = None
     planner_output_price: Optional[float] = None
     transcription_diarize: bool = True
+    # Mark laughter, crying, screaming, applause and loud outbursts found in
+    # the audio on the transcript for the planner (services/audio_events.py).
+    audio_events_enabled: bool = True
 
     @field_validator("planner_reasoning_effort", "layout_vision_reasoning_effort")
     @classmethod

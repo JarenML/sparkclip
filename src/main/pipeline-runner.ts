@@ -234,6 +234,7 @@ export async function validatePython(
     await execFileAsync(
       pythonPath, ['-c', `
 import cv2
+import onnxruntime
 from clip_engine.bridge_contract import BRIDGE_CONTRACT_VERSION
 from clip_engine.services.ai_clipping_pipeline import ClippingJobRequest
 from clip_engine.services.layout_analyzer import LayoutAnalyzer
