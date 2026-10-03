@@ -31,7 +31,7 @@ import yt_dlp
 from botocore.config import Config as BotocoreConfig
 
 from clip_engine.config import get_settings
-from clip_engine.error_policy import is_disk_full
+from clip_engine.error_policy import NETWORK_ERRORS, is_disk_full, is_unreachable
 from clip_engine.network_policy import guarded_public_connections, resolve_public_destination
 from clip_engine.services.media_process import (guarded_ytdlp_children, run_media,
                                                 validate_video_dimensions, MediaProcessError)
@@ -836,6 +836,8 @@ class VideoDownloaderService:
             self._remove_partial_files(output_path)
             if isinstance(e, VideoDownloadError):
                 raise
+            if is_unreachable(e):
+                raise unreachable_error() from e
             if source_type in VOD_PLATFORMS and not is_disk_full(e):
                 name = VOD_PLATFORMS[source_type][2]
                 raise VideoDownloadError(f"{name} VOD download failed", reason=f"{source_type}_unavailable") from e
@@ -1234,6 +1236,8 @@ class VideoDownloaderService:
         try:
             vods = await asyncio.get_event_loop().run_in_executor(None, fetch_listing)
         except Exception as e:
+            if is_unreachable(e):
+                raise unreachable_error() from e
             raise VideoDownloadError("Kick VOD unavailable", reason="kick_unavailable") from e
         vod = find_kick_vod_by_start(vods, start_ms)
         video_uuid = vod.get("video", {}).get("uuid") if vod else None
@@ -1299,6 +1303,8 @@ class VideoDownloaderService:
         try:
             info = await loop.run_in_executor(None, do_extract)
         except Exception as e:
+            if is_unreachable(e):
+                raise unreachable_error() from e
             if platform and not is_disk_full(e):
                 raise VideoDownloadError(f"{VOD_PLATFORMS[platform][2]} VOD unavailable", reason=f"{platform}_unavailable") from e
             error_str = str(e)
@@ -1338,3 +1344,8 @@ class VideoDownloadError(Exception):
     def __init__(self, message: str, reason: Optional[str] = None):
         super().__init__(message)
         self.reason = reason
+
+
+def unreachable_error() -> VideoDownloadError:
+    """For a source that couldn't be reached at all: a connection problem, not a missing video."""
+    return VideoDownloadError(NETWORK_ERRORS["network_unreachable"], reason="network_unreachable")

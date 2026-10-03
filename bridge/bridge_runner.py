@@ -38,6 +38,9 @@ TITLE_LANGUAGE_CODES = ("auto", "en", "es", "pt", "fr", "de", "it", "nl", "pl", 
 # request URLs, proxy credentials and local paths, so only these fixed strings
 # reach the UI. First match wins.
 FAILURES = (
+    (("could not connect to the video service",),
+     "SparkClip couldn't connect to the video service.",
+     "Check your internet connection, VPN or firewall, then run the job again."),
     (("selected planner requires a video with speech",),
      "The selected planning model cannot analyze a video without speech.",
      "Choose a planning model that supports silent-video planning in Advanced mode, or use Quality or Economy."),

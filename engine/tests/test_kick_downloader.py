@@ -240,3 +240,34 @@ def test_clip_windows_reuse_the_kept_info_at_full_quality(service, monkeypatch, 
     assert captured[-1]['format'] == 'b[vcodec!^=av01]'
     assert result.timeline_offset_seconds == 337.5
     assert Path(result.video_path).read_bytes() == b'window'
+
+
+def test_an_unreachable_service_is_reported_as_a_connection_problem(service, monkeypatch, tmp_path):
+    # The exact failure from a real run: the CDN's name didn't resolve.
+    dns = RuntimeError(
+        "ERROR: [kick:vod] 9d0925d9: Failed to download m3u8 information: HTTPSConnection(host='stream.kick.com', "
+        "port=443): Failed to resolve 'stream.kick.com' ([Errno 11001] getaddrinfo failed)"
+    )
+    for failure in ({'extract_error': dns}, {'fail': dns}):
+        fake_download(monkeypatch, service, **failure)
+        with pytest.raises(module.VideoDownloadError) as error:
+            asyncio.run(service.download_video(URL, str(tmp_path)))
+        assert safe_processing_error(error.value) == 'Could not connect to the video service'
+        assert safe_failure_code(error.value) == 'download.network_unreachable'
+        assert safe_job_error_text(safe_processing_error(error.value)) == 'Could not connect to the video service'
+
+
+def test_unreachable_is_told_apart_from_a_missing_video():
+    from clip_engine.error_policy import is_unreachable
+    import socket
+    assert is_unreachable(socket.gaierror(11001, 'getaddrinfo failed'))
+    assert is_unreachable(ConnectionError('[WinError 10061] Connection refused'))
+    try:
+        try:
+            raise socket.gaierror(-2, 'Name or service not known')
+        except socket.gaierror as cause:
+            raise RuntimeError('download failed') from cause
+    except RuntimeError as wrapped:
+        assert is_unreachable(wrapped)
+    for other in (RuntimeError('HTTP Error 404: Not Found'), RuntimeError('HTTP Error 403: Forbidden'), TimeoutError('read timed out')):
+        assert not is_unreachable(other)
