@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Ban, FolderOpen, ListVideo, Plus, RefreshCw, RotateCcw, Search, X } from 'lucide-react'
+import { Ban, FolderOpen, ListVideo, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from 'lucide-react'
 import type { HistoryEntry } from '../../preload/index'
 import { parseJobOutput } from '../../shared/job-output'
 import { MAX_PARALLEL_JOBS } from '../../shared/jobs'
 import { BackLink, ClipList } from '../components/ClipList'
+import { useDeleteRun } from '../components/DeleteRun'
 import { JobFailure, JobProgress, STAGE_LABELS } from '../components/JobProgress'
 import type { Page as AppPage } from '../components/Sidebar'
 import { StatusDot } from '../components/ui/Badge'
@@ -56,6 +57,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [openRun, setOpenRun] = useState<{ entry: HistoryEntry; output: JobOutput } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const requestId = useRef(0)
 
   const load = useCallback(async (manual = false) => {
@@ -73,6 +75,15 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
       if (request === requestId.current) setRefreshing(false)
     }
   }, [])
+
+  const onDeleted = useCallback((message: string) => {
+    setNotice(message)
+    setError(null)
+    focusJob(null)
+    setOpenRun(null)
+    void load()
+  }, [focusJob, load])
+  const deleteRun = useDeleteRun(onDeleted, setError)
 
   useEffect(() => {
     void load()
@@ -140,7 +151,9 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
       return <>{errorCallout}<JobProgress job={focused} leading={back} onCancel={() => { void cancel(focused) }} /></>
     }
     if (focused.status === 'completed' && focused.output) {
-      return <ClipList output={focused.output} outputDir={focused.outputDir} onNavigate={onNavigate} leading={back} />
+      const output = focused.output
+      const remove = (): void => deleteRun.ask({ jobId: focused.id, title: output.source_video_title || 'Untitled video', clipCount: output.clips.length })
+      return <>{errorCallout}<ClipList output={output} outputDir={focused.outputDir} onNavigate={onNavigate} leading={back} onDelete={remove} />{deleteRun.dialog}</>
     }
     if (focused.status === 'failed') {
       return <>{errorCallout}<JobFailure job={focused} leading={back} onRetry={() => { void runAgain(focused) }} /></>
@@ -149,35 +162,43 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
   }
 
   if (openRun) {
-    return <ClipList output={openRun.output} outputDir={openRun.entry.outputDir} onNavigate={onNavigate} leading={back} />
+    const { entry } = openRun
+    const remove = (): void => deleteRun.ask({ jobId: entry.jobId, title: entry.videoTitle, clipCount: entry.clipCount })
+    return <>{errorCallout}<ClipList output={openRun.output} outputDir={entry.outputDir} onNavigate={onNavigate} leading={back} onDelete={remove} />{deleteRun.dialog}</>
   }
 
   return (
-    <JobsList
-      active={active}
-      entries={entries}
-      filter={filter}
-      query={query}
-      error={error}
-      refreshing={refreshing}
-      onFilter={setFilter}
-      onQuery={setQuery}
-      onDismissError={() => setError(null)}
-      onRefresh={() => { void load(true) }}
-      onNew={() => onNavigate('clip')}
-      onOpenJob={(job) => { focusJob(job.id); document.getElementById('page-scroll')?.scrollTo({ top: 0 }) }}
-      onCancel={(job) => { void cancel(job) }}
-      onOpenEntry={(entry) => {
-        // This session's jobs open their live view; older runs load from disk.
-        if (useJobStore.getState().jobs[entry.jobId]) focusJob(entry.jobId)
-        else void openEntry(entry)
-      }}
-      onOpenFolder={(dir) => { void openFolder(dir) }}
-    />
+    <>
+      <JobsList
+        active={active}
+        entries={entries}
+        filter={filter}
+        query={query}
+        error={error}
+        refreshing={refreshing}
+        onFilter={setFilter}
+        onQuery={setQuery}
+        onDismissError={() => setError(null)}
+        onRefresh={() => { void load(true) }}
+        onNew={() => onNavigate('clip')}
+        onOpenJob={(job) => { focusJob(job.id); document.getElementById('page-scroll')?.scrollTo({ top: 0 }) }}
+        onCancel={(job) => { void cancel(job) }}
+        onOpenEntry={(entry) => {
+          // This session's jobs open their live view; older runs load from disk.
+          if (useJobStore.getState().jobs[entry.jobId]) focusJob(entry.jobId)
+          else void openEntry(entry)
+        }}
+        onOpenFolder={(dir) => { void openFolder(dir) }}
+        notice={notice}
+        onDismissNotice={() => setNotice(null)}
+        onDelete={(entry) => deleteRun.ask({ jobId: entry.jobId, title: entry.videoTitle, clipCount: entry.clipCount })}
+      />
+      {deleteRun.dialog}
+    </>
   )
 }
 
-function JobsList({ active, entries, filter, query, error, refreshing, onFilter, onQuery, onDismissError, onRefresh, onNew, onOpenJob, onCancel, onOpenEntry, onOpenFolder }: {
+function JobsList({ active, entries, filter, query, error, refreshing, onFilter, onQuery, onDismissError, onRefresh, onNew, onOpenJob, onCancel, onOpenEntry, onOpenFolder, notice, onDismissNotice, onDelete }: {
   active: Job[]
   entries: HistoryEntry[] | null
   filter: Filter
@@ -193,6 +214,9 @@ function JobsList({ active, entries, filter, query, error, refreshing, onFilter,
   onCancel: (job: Job) => void
   onOpenEntry: (entry: HistoryEntry) => void
   onOpenFolder: (dir: string) => void
+  notice: string | null
+  onDismissNotice: () => void
+  onDelete: (entry: HistoryEntry) => void
 }): React.JSX.Element {
   const sessionJobs = useJobStore((s) => s.jobs)
   const liveIds = useMemo(() => new Set(active.map((job) => job.id)), [active])
@@ -235,6 +259,7 @@ function JobsList({ active, entries, filter, query, error, refreshing, onFilter,
 
       <div className="mt-4 space-y-3">
         {error && <Callout tone="danger" onDismiss={onDismissError}>{error}</Callout>}
+        {notice && <Callout tone="success" onDismiss={onDismissNotice}>{notice}</Callout>}
 
         {active.length > 0 && (
           <Panel padded={false} className="overflow-hidden">
@@ -322,7 +347,7 @@ function JobsList({ active, entries, filter, query, error, refreshing, onFilter,
               ) : (
                 <ul className="divide-y divide-white/[0.05]">
                   {visible.map((entry) => (
-                    <PreviousJobRow key={entry.jobId} entry={entry} hasDetails={Boolean(sessionJobs[entry.jobId])} onOpen={() => onOpenEntry(entry)} onOpenFolder={() => onOpenFolder(entry.outputDir)} />
+                    <PreviousJobRow key={entry.jobId} entry={entry} hasDetails={Boolean(sessionJobs[entry.jobId])} onOpen={() => onOpenEntry(entry)} onOpenFolder={() => onOpenFolder(entry.outputDir)} onDelete={() => onDelete(entry)} />
                   ))}
                 </ul>
               )}
@@ -416,7 +441,7 @@ const STATUS_TEXT: Record<HistoryEntry['status'], string> = {
 }
 
 /** One line per run: status, title, then clips, run time, cost and date in aligned columns. */
-function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder }: { entry: HistoryEntry; hasDetails: boolean; onOpen: () => void; onOpenFolder: () => void }): React.JSX.Element {
+function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder, onDelete }: { entry: HistoryEntry; hasDetails: boolean; onOpen: () => void; onOpenFolder: () => void; onDelete: () => void }): React.JSX.Element {
   const status = STATUS[entry.status]
   const completed = entry.status === 'completed'
   // Failed and cancelled jobs from this session keep their options, so they can run again.
@@ -462,6 +487,16 @@ function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder }: { entry: Hi
         title="Open folder"
         icon={<FolderOpen className="h-3.5 w-3.5" />}
         onClick={onOpenFolder}
+        className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+      />
+      <Button
+        size="sm"
+        variant="ghost"
+        iconOnly
+        aria-label={`Delete ${entry.videoTitle}`}
+        title="Delete job"
+        icon={<Trash2 className="h-3.5 w-3.5" />}
+        onClick={onDelete}
         className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
       />
     </li>

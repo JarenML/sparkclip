@@ -127,6 +127,8 @@ export interface BridgeClipAPI {
   history: {
     list: () => Promise<HistoryEntry[]>
     getJob: (outputDir: string) => Promise<Record<string, unknown> | null>
+    /** Permanently delete a finished run's folder and everything cached for it. */
+    delete: (jobId: string) => Promise<{ freedBytes: number }>
   }
   thumbnails: {
     generate: (videoPath: string, seekSeconds?: number) => Promise<string | null>
@@ -234,7 +236,8 @@ const api: BridgeClipAPI = {
   },
   history: {
     list: () => ipcRenderer.invoke('history:list'),
-    getJob: (outputDir) => ipcRenderer.invoke('history:getJob', outputDir)
+    getJob: (outputDir) => ipcRenderer.invoke('history:getJob', outputDir),
+    delete: (jobId) => ipcRenderer.invoke('history:delete', jobId)
   },
   thumbnails: {
     generate: (videoPath, seekSeconds) => ipcRenderer.invoke('thumbnails:generate', videoPath, seekSeconds)

@@ -60,6 +60,14 @@ export function formatUsd(amount: number): string {
   return `$${amount.toFixed(2)}`
 }
 
+/** "272 MB", "1.4 GB", in the 1024-based units Windows Explorer shows. */
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${Math.max(0, Math.round(bytes))} bytes`
+}
+
 export function formatDate(isoString: string): string {
   const date = new Date(isoString)
   return date.toLocaleDateString('en-US', {
