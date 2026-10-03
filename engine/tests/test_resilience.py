@@ -66,7 +66,7 @@ def test_one_failed_clip_does_not_fail_the_job(monkeypatch, tmp_path):
     pipeline = AIClippingPipeline()
     pipeline.local_mode = True
 
-    async def download(url, output_dir, section=None):
+    async def download(url, output_dir, section=None, save_space=False):
         meta = SimpleNamespace(title="Test", duration_seconds=300.0, width=1920, height=1080)
         return SimpleNamespace(timeline_offset_seconds=0.0, source_duration_seconds=None, video_path=str(tmp_path / "src.mp4"), metadata=meta, file_size_bytes=1)
 
@@ -125,7 +125,7 @@ def test_saved_local_clips_complete_when_final_bookkeeping_fails(monkeypatch, tm
     pipeline = AIClippingPipeline()
     pipeline.local_mode = True
 
-    async def download(url, output_dir, section=None):
+    async def download(url, output_dir, section=None, save_space=False):
         meta = SimpleNamespace(title="Test", duration_seconds=30.0, width=1920, height=1080)
         return SimpleNamespace(timeline_offset_seconds=0.0, source_duration_seconds=None, video_path=str(tmp_path / "source.mp4"), metadata=meta, file_size_bytes=1)
 

@@ -47,6 +47,11 @@ export function kickSourceError(value: string): string | null {
   } catch { return null }
 }
 
+/** A Twitch or Kick VOD link: the sources that can download in parts (see the save-space option). */
+export function isStreamVod(value: string): boolean {
+  return Boolean(twitchVodId(value) || kickVod(value))
+}
+
 /** Why a link on a supported VOD platform can't be clipped, or null. */
 export function vodSourceError(value: string): string | null {
   return twitchSourceError(value) ?? kickSourceError(value)

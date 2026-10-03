@@ -257,6 +257,7 @@ async def run(config: dict) -> bool:
         layout_style=config.get("layout_style") or "auto",
         pacing=config.get("pacing") or "tight",
         title_language=config.get("title_language") or "auto",
+        save_space=config.get("save_space", False),
         video_speed=config.get("video_speed", 1.0),
         include_captions=config.get("include_captions", True),
         caption_style=caption_style,
@@ -330,7 +331,7 @@ def validate_config(config: object) -> dict:
     output = config.get("output_dir")
     if output is not None and (not isinstance(output, str) or not os.path.isabs(output) or "\0" in output):
         raise ValueError("Output directory must be an absolute path")
-    for field in ("include_captions", "auto_clip_count", "layout_vision_enabled"):
+    for field in ("include_captions", "auto_clip_count", "layout_vision_enabled", "save_space"):
         if field in config and not isinstance(config[field], bool):
             raise ValueError(f"{field} must be a boolean")
     count = config.get("max_clips")

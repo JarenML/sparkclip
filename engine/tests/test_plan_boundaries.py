@@ -221,7 +221,7 @@ class TestEmptyPlan:
         pipeline = AIClippingPipeline()
         pipeline.local_mode = True
 
-        async def download(url, output_dir, section=None):
+        async def download(url, output_dir, section=None, save_space=False):
             meta = SimpleNamespace(title="T", duration_seconds=300.0, width=1920, height=1080)
             return SimpleNamespace(timeline_offset_seconds=0.0, source_duration_seconds=None, video_path="x.mp4", metadata=meta, file_size_bytes=1)
 

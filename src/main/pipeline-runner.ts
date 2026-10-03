@@ -407,6 +407,7 @@ export function startClipJob(
     pacing: config.pacing || 'tight',
     video_speed: config.videoSpeed ?? 1,
     title_language: config.titleLanguage ?? 'auto',
+    save_space: config.saveSpace ?? false,
     include_captions: config.includeCaptions,
     caption_preset: config.captionPreset,
     keyterms: vocabularyTerms(settings.customVocabulary),

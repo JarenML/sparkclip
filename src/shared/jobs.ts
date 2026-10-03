@@ -19,6 +19,8 @@ export interface ClipJobRequest {
   videoSpeed?: number
   /** Language code for clip titles, or "auto" for the spoken language. Older requests use "auto". */
   titleLanguage?: string
+  /** Twitch and Kick VODs: plan from a small copy and download only each clip at full quality. */
+  saveSpace?: boolean
   includeCaptions: boolean
   captionPreset: string
   startTimeSeconds: number | null

@@ -77,6 +77,10 @@ Paste a public, completed Kick video link such as `https://kick.com/channel/vide
 
 Live channels, Kick clips, subscriber-only videos and deleted VODs are not supported. No Kick login or cookies are used.
 
+### Save disk space (Twitch and Kick VODs)
+
+Turn on **Save disk space** in Create → Video to keep a VOD job small on disk. SparkClip transcribes and plans from a 480p copy, which deletes itself once the clips are chosen, then downloads each clip's own stretch at full quality, renders it and deletes it. On Kick, 480p carries the same audio as 1080p, so transcription and timing match a normal job. With it off, the full-quality video is downloaded as usual.
+
 ## Develop
 
 **Prerequisites:** Node.js 22, Python 3.12, and FFmpeg with the libass-backed `ass` filter for captions. The clipping engine, model, fonts, and locked Python dependencies are included in this repository. In development, BridgeClip uses FFmpeg from `engine-bin/` when it exists, then falls back to your `PATH`. Provider keys are needed for live jobs, not tests.

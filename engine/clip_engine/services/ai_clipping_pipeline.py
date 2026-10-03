@@ -55,6 +55,7 @@ from clip_engine.services.transcription_service import (
 from clip_engine.services.visual_clip_sampling import has_visual_change, sample_visual_planning_frames
 from clip_engine.services.video_downloader import (
     DownloadResult,
+    VideoDownloadError,
     VideoDownloaderService,
 )
 from clip_engine.services.webhook_service import (
@@ -109,6 +110,9 @@ class ClippingJobRequest:
     video_speed: float = 1.0
     # Language code for clip titles, or "auto" for the language spoken in the video.
     title_language: str = "auto"
+    # Twitch and Kick VODs: plan from a small copy, then download each clip's
+    # window at full quality, instead of keeping the whole video on disk.
+    save_space: bool = False
 
     def __post_init__(self):
         validate_video_speed(self.video_speed)
@@ -232,17 +236,22 @@ class AIClippingPipeline:
             current_stage = "download"
             self._update_progress(job_id, JobStatus.DOWNLOADING, 5, "Downloading video...")
             stage_start = time.perf_counter()
+            requested_section = (request.start_time_seconds, request.end_time_seconds)
             download_result = await self.video_downloader.download_video(
                 url=request.video_url,
                 output_dir=work_dir,
-                section=(request.start_time_seconds, request.end_time_seconds),
+                section=requested_section,
+                save_space=request.save_space,
             )
+            # Save-space VODs: the download is a small copy, and each clip's
+            # window is fetched at full quality when it's rendered.
+            vod_info = download_result.vod_info if request.save_space else None
             stage_timings["download"] = time.perf_counter() - stage_start
             logger.info(f"Downloaded: {download_result.metadata.title}")
 
             # A VOD may arrive as just the selected part. Every later step then
             # works on the downloaded file's timeline, and saved times are
-            # shifted back onto the full VOD's (see _on_source_timeline).
+            # shifted back onto the full VOD's (see _shifted_clip).
             offset_ms = round(download_result.timeline_offset_seconds * 1000)
             if offset_ms:
                 offset = download_result.timeline_offset_seconds
@@ -311,7 +320,7 @@ class AIClippingPipeline:
 
             transcript_data = {
                 "segments": [
-                    asdict(self._transcript_on_source_timeline(s, offset_ms))
+                    asdict(self._shifted_transcript(s, offset_ms))
                     for s in transcription_result.segments
                 ],
                 "full_text": transcription_result.full_text,
@@ -367,7 +376,7 @@ class AIClippingPipeline:
                 )
 
             plan_data = {
-                "segments": [asdict(self._on_source_timeline(s, offset_ms)) for s in clip_plan.segments],
+                "segments": [asdict(self._shifted_clip(s, offset_ms)) for s in clip_plan.segments],
                 "total_clips": clip_plan.total_clips,
                 "target_platform": clip_plan.target_platform,
                 "insights": clip_plan.insights,
@@ -389,6 +398,14 @@ class AIClippingPipeline:
                 )
 
             capture_memory("after_planning")
+
+            if vod_info is not None:
+                # Clips render from full-quality windows: the small planning
+                # copy isn't needed any more, so give its space back now.
+                try:
+                    os.remove(download_result.video_path)
+                except OSError:
+                    logger.warning("Could not remove the planning copy early")
 
             # Step 4: Render clips (smart framing, parallel)
             current_stage = "rendering"
@@ -424,70 +441,118 @@ class AIClippingPipeline:
                     )
 
             async def render_clip_locked(i: int, segment: ClipPlanSegment) -> tuple[int, str, ClipPlanSegment]:
-                nonlocal layout_vision_cost
                 async with render_semaphore:
                     clip_start = time.perf_counter()
                     output_path = os.path.join(clips_dir, f"clip_{i:02d}.mp4")
 
-                    clip_transcript = self._filter_transcript_for_clip(
+                    source, window_dir = await clip_source(i, segment)
+                    try:
+                        return await render_from(i, segment, source, output_path, clip_start)
+                    finally:
+                        if window_dir:
+                            shutil.rmtree(window_dir, ignore_errors=True)
+
+            full_source: Optional[DownloadResult] = None
+            full_source_lock = asyncio.Lock()
+
+            async def clip_source(i: int, segment: ClipPlanSegment) -> tuple[DownloadResult, Optional[str]]:
+                """The file a clip renders from, and a window directory to delete after."""
+                nonlocal full_source
+                if vod_info is None:
+                    return download_result, None
+                window_dir = os.path.join(work_dir, "windows", f"clip_{i:02d}")
+                try:
+                    window = await self.video_downloader.download_vod_window(
+                        vod_info, download_result.source_type,
+                        (segment.start_time_ms + offset_ms) / 1000, (segment.end_time_ms + offset_ms) / 1000,
+                        window_dir,
+                    )
+                    return window, window_dir
+                except VideoDownloadError as e:
+                    shutil.rmtree(window_dir, ignore_errors=True)
+                    if getattr(e, "reason", None) != "window_unavailable":
+                        raise
+                # The playlist can't be cut: fall back to one full-quality
+                # download of the job's range, shared by the remaining clips.
+                async with full_source_lock:
+                    if full_source is None:
+                        logger.info("Clip windows unavailable; downloading the selected range at full quality")
+                        full_source = await self.video_downloader.download_video(
+                            url=request.video_url, output_dir=work_dir,
+                            output_filename="source_full.mp4", section=requested_section,
+                        )
+                return full_source, None
+
+            async def render_from(
+                i: int, segment: ClipPlanSegment, source: DownloadResult, output_path: str, clip_start: float,
+            ) -> tuple[int, str, ClipPlanSegment]:
+                nonlocal layout_vision_cost
+                # Plan times are on the planning download's timeline; move them
+                # onto the file this clip renders from (zero unless a save-space
+                # job fetched a window or a full-quality copy).
+                shift_ms = offset_ms - round(source.timeline_offset_seconds * 1000)
+                placed = self._shifted_clip(segment, shift_ms)
+                clip_transcript = [
+                    self._shifted_transcript(s, shift_ms) for s in self._filter_transcript_for_clip(
                         transcription_result.segments,
                         segment.start_time_ms,
                         segment.end_time_ms,
                     )
+                ]
 
-                    render_request = RenderRequest(
-                        video_path=download_result.video_path,
-                        output_path=output_path,
-                        start_time_ms=segment.start_time_ms,
-                        end_time_ms=segment.end_time_ms,
-                        source_width=download_result.metadata.width,
-                        source_height=download_result.metadata.height,
-                        # Always passed: tight pacing needs word timings even without captions.
-                        transcript_segments=clip_transcript,
-                        include_captions=request.include_captions and transcription_status == "available",
-                        caption_style=request.caption_style,
-                        title_text=segment.summary,
-                        emphasis_words=segment.emphasis_words,
-                        banner_platform=request.banner_platform,
-                        banner_channel_url=request.banner_channel_url,
-                        aspect_ratio=request.aspect_ratio,
-                        layout_style=request.layout_style,
-                        pacing=request.pacing,
-                        video_speed=request.video_speed,
-                        longform=longform,
-                        skip_ranges_ms=segment.skip_ranges_ms,
-                        chapters=segment.chapters,
-                    )
+                render_request = RenderRequest(
+                    video_path=source.video_path,
+                    output_path=output_path,
+                    start_time_ms=placed.start_time_ms,
+                    end_time_ms=placed.end_time_ms,
+                    source_width=source.metadata.width,
+                    source_height=source.metadata.height,
+                    # Always passed: tight pacing needs word timings even without captions.
+                    transcript_segments=clip_transcript,
+                    include_captions=request.include_captions and transcription_status == "available",
+                    caption_style=request.caption_style,
+                    title_text=segment.summary,
+                    emphasis_words=segment.emphasis_words,
+                    banner_platform=request.banner_platform,
+                    banner_channel_url=request.banner_channel_url,
+                    aspect_ratio=request.aspect_ratio,
+                    layout_style=request.layout_style,
+                    pacing=request.pacing,
+                    video_speed=request.video_speed,
+                    longform=longform,
+                    skip_ranges_ms=placed.skip_ranges_ms,
+                    chapters=placed.chapters,
+                )
 
-                    render_result = await self.rendering_service.render_clip(render_request)
-                    segment.layout_type = render_result.layout_type
-                    segment.render_fallback = render_result.render_fallback
-                    segment.output_chapters = render_result.chapters
-                    segment.subtitle_path = render_result.subtitle_path
-                    layout_vision_cost += render_result.layout_cost_usd
-                    clip_durations_ms[i] = render_result.duration_ms
-                    if render_result.render_fallback:
-                        framing_status = "fallback"
-                    elif request.aspect_ratio == "16:9" or request.layout_style == LayoutStyle.FIT:
-                        framing_status = "classic"
-                    elif render_result.layout_type == "fit":
-                        framing_status = "whole_frame_auto"
-                    else:
-                        framing_status = "smart"
-                    clip_layouts.append({
-                        "clip_index": i,
-                        "layout_type": render_result.layout_type,
-                        "framing_status": framing_status,
-                        "shots": render_result.layout_shots,
-                        "pacing_removed_ms": render_result.removed_ms,
-                        "render_fallback": render_result.render_fallback,
-                    })
-                    logger.info(
-                        f"Rendered clip {i + 1} ({render_result.layout_type}): "
-                        f"{render_result.file_size_bytes / 1024 / 1024:.1f} MB"
-                    )
-                    clip_render_durations_seconds.append(time.perf_counter() - clip_start)
-                    return (i, render_result.output_path, segment)
+                render_result = await self.rendering_service.render_clip(render_request)
+                segment.layout_type = render_result.layout_type
+                segment.render_fallback = render_result.render_fallback
+                segment.output_chapters = render_result.chapters
+                segment.subtitle_path = render_result.subtitle_path
+                layout_vision_cost += render_result.layout_cost_usd
+                clip_durations_ms[i] = render_result.duration_ms
+                if render_result.render_fallback:
+                    framing_status = "fallback"
+                elif request.aspect_ratio == "16:9" or request.layout_style == LayoutStyle.FIT:
+                    framing_status = "classic"
+                elif render_result.layout_type == "fit":
+                    framing_status = "whole_frame_auto"
+                else:
+                    framing_status = "smart"
+                clip_layouts.append({
+                    "clip_index": i,
+                    "layout_type": render_result.layout_type,
+                    "framing_status": framing_status,
+                    "shots": render_result.layout_shots,
+                    "pacing_removed_ms": render_result.removed_ms,
+                    "render_fallback": render_result.render_fallback,
+                })
+                logger.info(
+                    f"Rendered clip {i + 1} ({render_result.layout_type}): "
+                    f"{render_result.file_size_bytes / 1024 / 1024:.1f} MB"
+                )
+                clip_render_durations_seconds.append(time.perf_counter() - clip_start)
+                return (i, render_result.output_path, segment)
 
             render_tasks = [
                 render_single_clip(i, segment)
@@ -509,7 +574,7 @@ class AIClippingPipeline:
                 raise failures[0][1]
             # Rendering is done with the downloaded file: from here on, clip
             # times are only reported, so put them on the source's timeline.
-            rendered_clips = [(path, self._on_source_timeline(segment, offset_ms)) for _, path, segment in successes]
+            rendered_clips = [(path, self._shifted_clip(segment, offset_ms)) for _, path, segment in successes]
             source_duration = download_result.source_duration_seconds or download_result.metadata.duration_seconds
             # Output clips are renumbered 0..n-1; carry their durations and
             # layout records across so they still line up after a failure.
@@ -680,6 +745,7 @@ class AIClippingPipeline:
                     "pacing": request.pacing,
                     "title_language": request.title_language,
                     "video_speed": request.video_speed,
+                    "save_space": request.save_space,
                 },
                 "transcription_status": transcription_status,
                 "planning_source": "visual" if visual_frames else "transcript",
@@ -956,7 +1022,7 @@ class AIClippingPipeline:
         return filtered
 
     @staticmethod
-    def _on_source_timeline(segment: ClipPlanSegment, offset_ms: int) -> ClipPlanSegment:
+    def _shifted_clip(segment: ClipPlanSegment, offset_ms: int) -> ClipPlanSegment:
         """A copy of a planned clip with its source times moved by offset_ms.
 
         Chapters on the rendered clip's own timeline (output_chapters) stay put.
@@ -972,7 +1038,7 @@ class AIClippingPipeline:
         )
 
     @staticmethod
-    def _transcript_on_source_timeline(segment: TranscriptSegment, offset_ms: int) -> TranscriptSegment:
+    def _shifted_transcript(segment: TranscriptSegment, offset_ms: int) -> TranscriptSegment:
         """A copy of a transcript segment, and its words, moved by offset_ms."""
         if not offset_ms:
             return segment

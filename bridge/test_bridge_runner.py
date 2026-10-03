@@ -71,6 +71,10 @@ class BridgeTests(unittest.TestCase):
         with patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()):
             self.assertTrue(asyncio.run(bridge.run(self.config(video_speed=1.5))))
         self.assertEqual(requests[-1]["video_speed"], 1.5)
+        self.assertIs(requests[-1]["save_space"], False)
+        with patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()):
+            self.assertTrue(asyncio.run(bridge.run(self.config(save_space=True))))
+        self.assertIs(requests[-1]["save_space"], True)
 
     def test_video_speed_validation(self):
         for speed in (1, 1.1, 1.25, 1.5, 1.75, 2):
@@ -78,6 +82,13 @@ class BridgeTests(unittest.TestCase):
         for speed in (None, True, "1.5", 0, 0.5, 2.01, float("nan"), float("inf")):
             with self.subTest(speed=speed), self.assertRaises(ValueError):
                 bridge.validate_config(self.config(video_speed=speed))
+
+    def test_save_space_validation(self):
+        for value in (True, False):
+            self.assertIsNotNone(bridge.validate_config(self.config(save_space=value)))
+        for value in (None, 1, "true"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                bridge.validate_config(self.config(save_space=value))
 
     def test_title_language_validation(self):
         for language in (None, "auto", "es", "en", "ja"):

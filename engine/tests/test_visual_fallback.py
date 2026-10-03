@@ -148,7 +148,7 @@ def test_visual_fallback_completes_without_captions_and_discloses_status(monkeyp
     pipeline = AIClippingPipeline()
     pipeline.local_mode = True
 
-    async def download(url, output_dir, section=None):
+    async def download(url, output_dir, section=None, save_space=False):
         return SimpleNamespace(
             timeline_offset_seconds=0.0, source_duration_seconds=None,
             video_path=str(tmp_path / "source.mp4"), file_size_bytes=1,
@@ -210,7 +210,7 @@ def test_provider_failure_stops_before_visual_planning(monkeypatch, tmp_path, re
     pipeline = AIClippingPipeline()
     pipeline.local_mode = True
 
-    async def download(url, output_dir, section=None):
+    async def download(url, output_dir, section=None, save_space=False):
         return SimpleNamespace(
             timeline_offset_seconds=0.0, source_duration_seconds=None,
             video_path=str(tmp_path / "source.mp4"), file_size_bytes=1,
