@@ -167,7 +167,7 @@ export function JobInfoDialog({ entry, onClose }: { entry: HistoryEntry; onClose
                 {section.rows.map((row) => (
                   <div key={row.label} className="flex items-start gap-3 px-3 py-2">
                     <dt className="w-24 shrink-0 text-xs text-ink-subtle">{row.label}</dt>
-                    <dd className={`min-w-0 flex-1 break-all text-sm text-ink ${row.mono ? 'font-mono text-xs' : ''}`} data-selectable>{row.value}</dd>
+                    <dd className={`min-w-0 flex-1 text-sm text-ink ${row.mono ? 'break-all font-mono text-xs' : 'break-words'}`} data-selectable>{row.value}</dd>
                     {row.copy && (
                       <Button size="sm" variant="ghost" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy(row)} aria-label={`Copy ${row.label.toLowerCase()}`}>
                         {copied === row.label ? 'Copied' : 'Copy'}

@@ -230,12 +230,12 @@ function RunCard({ entry, onOpen, onInfo, onOpenFolder }: {
   const [previewFailed, setPreviewFailed] = useState(false)
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <button
         onClick={failed ? onOpenFolder : onOpen}
         aria-label={failed ? `Open folder for ${entry.status === 'incomplete' ? 'unfinished' : 'unreadable'} run` : undefined}
         className={cn(
-          'glass group rounded-2xl p-1.5 text-left transition-[transform,box-shadow] duration-300 ease-out',
+          'glass group block w-full rounded-2xl p-1.5 text-left transition-[transform,box-shadow] duration-300 ease-out',
           'hover:-translate-y-1 hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.1),0_0_0_1px_rgb(255_255_255/0.08),0_28px_56px_-24px_rgb(0_0_0/0.8)]'
         )}
       >
