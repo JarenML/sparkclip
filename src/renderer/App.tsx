@@ -8,6 +8,8 @@ import { SettingsPage } from './pages/SettingsPage'
 import { AccountsPage } from './pages/AccountsPage'
 import { PostsPage } from './pages/PostsPage'
 import { AutomationsPage } from './pages/AutomationsPage'
+import { CreatorsPage } from './pages/CreatorsPage'
+import { useCreatorViewStore } from './store/use-creator-view-store'
 import { BridgeClipLogo } from './components/brand/BridgeClipLogo'
 import { useSettingsStore } from './store/use-settings-store'
 import { useJobStore } from './store/use-job-store'
@@ -56,7 +58,13 @@ export default function App(): React.JSX.Element {
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
   }, [])
 
-  // ⌘1 Create, ⌘2 Library, ⌘3 Jobs, ⌘4 Accounts, ⌘5 Posts, ⌘6 Automations, ⌘, Settings,
+  // A clicked creator notification opens that creator's profile.
+  useEffect(() => getApi().creators.onOpen((creatorId) => {
+    useCreatorViewStore.getState().open(creatorId)
+    setPage('creators')
+  }), [])
+
+  // ⌘1 Create, ⌘2 Library, ⌘3 Jobs, ⌘4 Creators, ⌘5 Accounts, ⌘6 Posts, ⌘7 Automations, ⌘, Settings,
   // ⌘\ collapse or expand the sidebar (Ctrl on Windows/Linux).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -90,6 +98,7 @@ export default function App(): React.JSX.Element {
           {page === 'clip' && <ClipPage onNavigate={setPage} />}
           {page === 'library' && <LibraryPage onNavigate={setPage} />}
           {page === 'jobs' && <JobsPage onNavigate={setPage} />}
+          {page === 'creators' && <CreatorsPage onNavigate={setPage} />}
           {page === 'accounts' && <AccountsPage onNavigate={setPage} />}
           {page === 'posts' && <PostsPage onNavigate={setPage} />}
           {page === 'automations' && <AutomationsPage onNavigate={setPage} />}

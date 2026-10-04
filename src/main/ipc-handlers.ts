@@ -3,6 +3,8 @@ import { existsSync, realpathSync } from 'fs'
 import { loadSettings, publicSettings, replaceApiKey, savePublicSettings, type ApiKeyName, type PublicSettings } from './settings-store'
 import { deleteRun, ensureOutputDir, getJobHistory, getJobOutput, generateThumbnail } from './file-manager'
 import { currentShare, startShare, stopShare } from './lan-share'
+import type { CreatorInput } from '../shared/creators'
+import { creatorProfileLink, deleteCreator, getCreatorAvatar, getCreatorFeed, listCreators, markCreatorViewed, saveCreator, setCreatorNotify } from './creators'
 import {
   getEnginePath,
   getBridgeRunnerPath,
@@ -262,6 +264,28 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   handle('share:stop', () => { stopShare(); return true })
   handle('share:status', () => currentShare())
 
+  const fetchImpl = (url: string, init?: RequestInit): Promise<Response> => net.fetch(url, init)
+  handle('creators:list', () => listCreators())
+  handle('creators:save', (_event, input: unknown, id: unknown) => saveCreator(input as CreatorInput, typeof id === 'string' ? id : undefined))
+  handle('creators:delete', (_event, id: unknown) => deleteCreator(id))
+  handle('creators:notify', (_event, id: unknown, on: unknown) => setCreatorNotify(id, on))
+  handle('creators:feed', (_event, id: unknown, platform: unknown, refresh: unknown) => getCreatorFeed(fetchImpl, id, platform, refresh === true))
+  handle('creators:viewed', (_event, id: unknown, platform: unknown) => { markCreatorViewed(id, platform); return true })
+  handle('creators:avatar', (_event, id: unknown) => getCreatorAvatar(fetchImpl, id))
+  handle('creators:openProfile', async (_event, id: unknown, platform: unknown) => {
+    const link = creatorProfileLink(id, platform)
+    if (!link) return false
+    await shell.openExternal(link)
+    return true
+  })
+  // Videos listed in a creator's feed open in the browser; only their own
+  // https pages on YouTube, Twitch and Kick qualify.
+  handle('creators:openVideo', async (_event, url: unknown) => {
+    if (!isCreatorVideoUrl(url)) return false
+    await shell.openExternal(url)
+    return true
+  })
+
   handle('history:getJob', (_event, outputDir: string) => {
     assertAbsolutePath(outputDir)
     if (!isWithinDirectory(outputDir, loadSettings().outputDirectory)) throw new Error('Job is outside the library')
@@ -438,4 +462,19 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     logger.info('system.checkTools', result)
     return result
   })
+}
+
+/** A YouTube video or Short, a Twitch VOD, a Kick VOD, or a Twitch or Kick channel page. */
+export function isCreatorVideoUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 300) return false
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return false
+    if (url.hostname === 'www.youtube.com') return /^\/(watch|shorts\/[\w-]{11})$/.test(url.pathname) && (url.pathname !== '/watch' || /^[\w-]{11}$/.test(url.searchParams.get('v') ?? ''))
+    if (url.hostname === 'www.twitch.tv') return /^\/(videos\/\d{1,20}|[A-Za-z0-9_]{3,25})$/.test(url.pathname)
+    if (url.hostname === 'kick.com') return /^\/[A-Za-z0-9_-]{2,30}(\/videos\/[0-9a-f-]{36})?$/i.test(url.pathname)
+    return false
+  } catch {
+    return false
+  }
 }
