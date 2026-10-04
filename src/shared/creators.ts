@@ -50,6 +50,8 @@ export interface CreatorFeed {
   platform: FeedPlatform
   /** For YouTube, which list this is. */
   kind?: YoutubeKind
+  /** Whether "Load more" can list older videos. */
+  hasMore: boolean
   items: FeedItem[]
   live: { title: string; viewers: number | null; url: string } | null
   avatar: string | null

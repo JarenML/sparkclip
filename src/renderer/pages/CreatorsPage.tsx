@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, BellOff, ExternalLink, Pencil, Plus, Radio, RefreshCw, Scissors, Trash2, UserRound } from 'lucide-react'
 import { CREATOR_PLATFORMS, CREATOR_PLATFORM_NAMES, FEED_PLATFORMS, creatorAccount, type Creator, type CreatorFeed, type FeedItem, type FeedPlatform, type YoutubeKind } from '../../shared/creators'
 import { BackLink } from '../components/ClipList'
@@ -158,7 +158,11 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
   const [youtubeKind, setYoutubeKind] = useState<YoutubeKind>('lives')
   const [feed, setFeed] = useState<CreatorFeed | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The list on screen, so a "Load more" answer for another tab is dropped.
+  const listRef = useRef('')
+  listRef.current = `${platform}:${youtubeKind}`
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const avatar = useAvatar(creator.id)
   const closeConfirm = useCallback(() => setConfirm(null), [])
@@ -186,6 +190,20 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
     setFeed(null)
     void loadFeed()
   }, [loadFeed])
+
+  const loadMore = async (): Promise<void> => {
+    if (!platform) return
+    const list = listRef.current
+    setLoadingMore(true)
+    try {
+      const result = await getApi().creators.more(creator.id, platform, youtubeKind)
+      if (listRef.current === list) setFeed(result)
+    } catch (err) {
+      setError(errorMessage(err, 'Could not load more videos.'))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const toggleNotify = async (): Promise<void> => {
     try {
@@ -296,6 +314,11 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
               ? Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="aspect-video rounded-2xl" />)
               : feed.items.map((item) => <VideoCard key={item.id} item={item} onClip={() => clip(item)} />)}
           </div>
+          {feed?.hasMore && (
+            <div className="mt-5 flex justify-center">
+              <Button onClick={() => { void loadMore() }} loading={loadingMore} disabled={loading}>Load more</Button>
+            </div>
+          )}
           {feed && !feed.error && feed.items.length === 0 && (
             <p className="mt-4 text-sm text-ink-subtle">{platform === 'youtube' && youtubeKind === 'lives' ? 'No streams on their YouTube Live tab. Switch to Videos to see uploads.' : `No videos on ${CREATOR_PLATFORM_NAMES[platform]} yet.`}</p>
           )}

@@ -141,6 +141,8 @@ export interface BridgeClipAPI {
     /** Latest videos on one platform; `refresh` skips the few-minute cache. */
     feed: (id: string, platform: FeedPlatform, refresh?: boolean, kind?: YoutubeKind) => Promise<CreatorFeed>
     /** Uploads after now stop counting as new on that tab. */
+    /** The list `feed` returned, with the next older videos added. */
+    more: (id: string, platform: FeedPlatform, kind?: YoutubeKind) => Promise<CreatorFeed>
     markViewed: (id: string, platform: FeedPlatform) => Promise<boolean>
     avatar: (id: string) => Promise<string | null>
     openProfile: (id: string, platform: CreatorPlatform) => Promise<boolean>
@@ -274,6 +276,7 @@ const api: BridgeClipAPI = {
     delete: (id) => ipcRenderer.invoke('creators:delete', id),
     setNotify: (id, on) => ipcRenderer.invoke('creators:notify', id, on),
     feed: (id, platform, refresh, kind) => ipcRenderer.invoke('creators:feed', id, platform, refresh === true, kind ?? 'lives'),
+    more: (id, platform, kind) => ipcRenderer.invoke('creators:more', id, platform, kind ?? 'lives'),
     markViewed: (id, platform) => ipcRenderer.invoke('creators:viewed', id, platform),
     avatar: (id) => ipcRenderer.invoke('creators:avatar', id),
     openProfile: (id, platform) => ipcRenderer.invoke('creators:openProfile', id, platform),

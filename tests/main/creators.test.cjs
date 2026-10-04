@@ -14,9 +14,8 @@ function load(dir) {
   })
 }
 
-/** A channel tab page as YouTube serves it: ytInitialData with one lockupViewModel per video. */
-const ytPage = (channel, tab, videos) => {
-  const lockup = ([id, title, badge, ...meta]) => ({ richItemRenderer: { content: { lockupViewModel: {
+/** One video in a YouTube channel grid. */
+const ytLockup = ([id, title, badge, ...meta]) => ({ richItemRenderer: { content: { lockupViewModel: {
     contentId: id, contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
     contentImage: { thumbnailViewModel: {
       image: { sources: [{ url: `https://i.ytimg.com/vi/${id}/small.jpg` }, { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` }] },
@@ -26,12 +25,17 @@ const ytPage = (channel, tab, videos) => {
       metadataParts: meta.map((label) => ({ text: { content: label }, accessibilityLabel: label }))
     }] } } } }
   } } } })
+
+const ytContinuation = (token) => ({ continuationItemRenderer: token ? { continuationEndpoint: { continuationCommand: { token } } } : {} })
+
+/** A channel tab page as YouTube serves it: ytInitialData with one lockupViewModel per video. */
+const ytPage = (channel, tab, videos, token = null) => {
   const data = { contents: { twoColumnBrowseResultsRenderer: { tabs: [
     { tabRenderer: { title: 'Home', endpoint: { commandMetadata: { webCommandMetadata: { url: `/${channel}/featured` } } } } },
     { tabRenderer: { title: tab, selected: true, endpoint: { commandMetadata: { webCommandMetadata: { url: `/${channel}/${tab}` } } },
-      content: { richGridRenderer: { contents: [...videos.map(lockup), { continuationItemRenderer: {} }] } } } }
+      content: { richGridRenderer: { contents: [...videos.map(ytLockup), ytContinuation(token)] } } } }
   ] } } }
-  return `<html><meta property="og:image" content="https://yt3.googleusercontent.com/avatar=s900">"externalId":"UCWsDFcIhY2DBi3GB5uykGXA"<script>var ytInitialData = ${JSON.stringify(data)};</script></html>`
+  return `<html><meta property="og:image" content="https://yt3.googleusercontent.com/avatar=s900">"externalId":"UCWsDFcIhY2DBi3GB5uykGXA"<script>ytcfg.set({"INNERTUBE_CLIENT_VERSION":"2.20261002.01.00"});var ytInitialData = ${JSON.stringify(data)};</script></html>`
 }
 
 /** A fetch that serves routes by URL prefix and records each request. */
@@ -154,6 +158,50 @@ test('YouTube, Twitch and Kick feeds list recent videos, thumbnails and live str
     const home = ytPage('@IShowSpeed', 'featured', [['o1_FvfJD8fg', 'I GOT A JOB AT KFC!', '12:31', '1.9 million views', '6 days ago']])
     const none = await api.getCreatorFeed(async () => new Response(home), creator.id, 'youtube', true)
     assert.deepEqual([none.error, none.items.length, none.live], [null, 0, null])
+  } finally { cleanup() }
+})
+
+test('Load more adds the next older videos, reading further pages as needed', async () => {
+  const { dir, cleanup } = tempDir()
+  try {
+    const api = load(dir)
+    const creator = api.saveCreator({ name: 'Speed', links: { youtube: '@IShowSpeed', twitch: 'ishowspeed', kick: 'speed' }, notify: false })
+    const video = (n) => [`vid${String(n).padStart(8, '0')}`, `Stream ${n}`, '1:00:00', '10 views', `Streamed ${n} days ago`]
+    const range = (from, to) => Array.from({ length: to - from }, (_, i) => video(from + i))
+    const { fetchImpl, calls } = fakeFetch({
+      // The page holds 20 videos; the API serves two more pages, repeating one video.
+      'https://www.youtube.com/@IShowSpeed/streams': () => new Response(ytPage('@IShowSpeed', 'streams', range(1, 21), 'token-1')),
+      'https://www.youtube.com/youtubei/v1/browse': (_url, init) => {
+        const { continuation, context } = JSON.parse(init.body)
+        assert.equal(context.client.clientVersion, '2.20261002.01.00')
+        const items = continuation === 'token-1' ? [...range(20, 26), ytContinuation('token-2')] : range(26, 30)
+        return json({ onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: items.map((v) => (Array.isArray(v) ? ytLockup(v) : v)) } }] })
+      },
+      'https://gql.twitch.tv/gql': () => json({ data: { user: { stream: null, videos: { edges: Array.from({ length: 18 }, (_, i) => ({ node: { id: String(1000 + i), title: `VOD ${i}`, publishedAt: '2026-10-01T00:00:00Z' } })) } } } }),
+      'https://kick.com/api/v2/channels/speed/videos': () => json([]),
+      'https://kick.com/api/v2/channels/speed': () => json({ livestream: null }),
+      'https://i.ytimg.com/': image, 'https://yt3.googleusercontent.com/': image
+    })
+    const ids = (feed) => feed.items.map((i) => Number(i.id.slice(3)))
+
+    let feed = await api.getCreatorFeed(fetchImpl, creator.id, 'youtube')
+    assert.deepEqual([feed.items.length, feed.hasMore], [15, true])
+    assert.ok(!calls.some((c) => c.url.includes('youtubei')), 'the first page needs only the channel page')
+    feed = await api.getMoreCreatorFeed(fetchImpl, creator.id, 'youtube')
+    // 5 left from the page, then both API pages (the repeated video once): 1–29.
+    assert.deepEqual(ids(feed), Array.from({ length: 29 }, (_, i) => i + 1))
+    assert.equal(feed.hasMore, false)
+    assert.ok(feed.items.every((i) => i.thumbnail && !i.isNew))
+    assert.deepEqual(ids(await api.getCreatorFeed(fetchImpl, creator.id, 'youtube')), ids(feed), 'reopening the tab keeps what was loaded')
+    await assert.rejects(api.getMoreCreatorFeed(fetchImpl, creator.id, 'youtube', 'uploads'), /out of date/)
+
+    // Twitch gives every kept VOD in one large page; Kick in one response.
+    feed = await api.getCreatorFeed(fetchImpl, creator.id, 'twitch')
+    assert.match(JSON.parse(calls.find((c) => c.url === 'https://gql.twitch.tv/gql').init.body).query, /videos\(first: 100,/)
+    assert.deepEqual([feed.items.length, feed.hasMore], [15, true])
+    feed = await api.getMoreCreatorFeed(fetchImpl, creator.id, 'twitch')
+    assert.deepEqual([feed.items.length, feed.hasMore], [18, false])
+    assert.equal((await api.getCreatorFeed(fetchImpl, creator.id, 'kick')).hasMore, false)
   } finally { cleanup() }
 })
 

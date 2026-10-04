@@ -4,7 +4,7 @@ import { loadSettings, publicSettings, replaceApiKey, savePublicSettings, type A
 import { deleteRun, ensureOutputDir, getJobHistory, getJobOutput, generateThumbnail } from './file-manager'
 import { currentShare, startShare, stopShare } from './lan-share'
 import type { CreatorInput } from '../shared/creators'
-import { creatorProfileLink, deleteCreator, getCreatorAvatar, getCreatorFeed, listCreators, markCreatorViewed, saveCreator, setCreatorNotify } from './creators'
+import { creatorProfileLink, deleteCreator, getCreatorAvatar, getCreatorFeed, getMoreCreatorFeed, listCreators, markCreatorViewed, saveCreator, setCreatorNotify } from './creators'
 import {
   getEnginePath,
   getBridgeRunnerPath,
@@ -270,6 +270,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   handle('creators:delete', (_event, id: unknown) => deleteCreator(id))
   handle('creators:notify', (_event, id: unknown, on: unknown) => setCreatorNotify(id, on))
   handle('creators:feed', (_event, id: unknown, platform: unknown, refresh: unknown, kind: unknown) => getCreatorFeed(fetchImpl, id, platform, refresh === true, kind))
+  handle('creators:more', (_event, id: unknown, platform: unknown, kind: unknown) => getMoreCreatorFeed(fetchImpl, id, platform, kind))
   handle('creators:viewed', (_event, id: unknown, platform: unknown) => { markCreatorViewed(id, platform); return true })
   handle('creators:avatar', (_event, id: unknown) => getCreatorAvatar(fetchImpl, id))
   handle('creators:openProfile', async (_event, id: unknown, platform: unknown) => {
