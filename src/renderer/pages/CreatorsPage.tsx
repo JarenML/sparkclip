@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BellOff, ExternalLink, Pencil, Plus, Radio, RefreshCw, Scissors, Trash2, UserRound } from 'lucide-react'
+import { Bell, BellOff, Clapperboard, ExternalLink, MonitorPlay, Pencil, Plus, Radio, RefreshCw, Scissors, Sparkles, Trash2, UserRound } from 'lucide-react'
 import { CREATOR_PLATFORMS, CREATOR_PLATFORM_NAMES, FEED_PLATFORMS, creatorAccount, type Creator, type CreatorFeed, type FeedItem, type FeedPlatform, type YoutubeKind } from '../../shared/creators'
-import { BackLink } from '../components/ClipList'
+import type { HistoryEntry } from '../../preload/index'
+import { BackLink, ClipList } from '../components/ClipList'
+import { useDeleteRun } from '../components/DeleteRun'
+import { JobInfoDialog } from '../components/JobInfoDialog'
+import type { JobOutput } from '../store/use-job-store'
+import { loadRunOutput, RunCard } from './LibraryPage'
+import { AssignCreatorDialog } from '../components/AssignCreatorDialog'
 import { CreatorDialog } from '../components/CreatorDialog'
 import { CreatorIcon } from '../components/CreatorIcon'
 import type { Page as AppPage } from '../components/Sidebar'
@@ -155,11 +161,20 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
 }): React.JSX.Element {
   const platforms = useMemo(() => FEED_PLATFORMS.filter((platform) => creator.links[platform]), [creator.links])
   const [platform, setPlatform] = useState<FeedPlatform | null>(platforms[0] ?? null)
+  // The Clips tab: runs made for this creator, instead of a platform's videos.
+  const [showClips, setShowClips] = useState(false)
+  const [openRun, setOpenRun] = useState<{ entry: HistoryEntry; output: JobOutput } | null>(null)
+  const [clipsVersion, setClipsVersion] = useState(0)
   const [youtubeKind, setYoutubeKind] = useState<YoutubeKind>('lives')
   const [feed, setFeed] = useState<CreatorFeed | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const onRunDeleted = useCallback(() => {
+    setOpenRun(null)
+    setClipsVersion((version) => version + 1)
+  }, [])
+  const deleteRun = useDeleteRun(onRunDeleted, setError)
   // The list on screen, so a "Load more" answer for another tab is dropped.
   const listRef = useRef('')
   listRef.current = `${platform}:${youtubeKind}`
@@ -224,11 +239,32 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
   const clip = (item: FeedItem): void => {
     const draft = useDraftStore.getState()
     draft.startAnother()
-    draft.update({ source: item.url })
+    draft.update({ source: item.url, creatorId: creator.id })
     onNavigate('clip')
   }
 
   const links = CREATOR_PLATFORMS.filter((p) => creator.links[p])
+
+  if (openRun) {
+    const { entry } = openRun
+    return (
+      <>
+        {error && (
+          <Page width="wide" className="pb-0">
+            <Callout tone="danger" onDismiss={() => setError(null)}>{error}</Callout>
+          </Page>
+        )}
+        <ClipList
+          output={openRun.output}
+          outputDir={entry.outputDir}
+          onNavigate={onNavigate}
+          leading={<BackLink label={creator.name} onClick={() => setOpenRun(null)} />}
+          onDelete={() => deleteRun.ask({ jobId: entry.jobId, title: entry.videoTitle, clipCount: entry.clipCount })}
+        />
+        {deleteRun.dialog}
+      </>
+    )
+  }
 
   return (
     <Page width="wide">
@@ -269,28 +305,54 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
 
       {error && <Callout tone="danger" className="mt-4" onDismiss={() => setError(null)}>{error}</Callout>}
 
-      {platform ? (
+      <Segmented<'channels' | 'clips'>
+        label="Section"
+        className="mt-5"
+        value={showClips || !platform ? 'clips' : 'channels'}
+        onChange={(value) => setShowClips(value === 'clips')}
+        options={[
+          ...(platforms.length > 0 ? [{ value: 'channels' as const, label: <span className="inline-flex items-center gap-1.5"><MonitorPlay className="h-3.5 w-3.5" />Channels</span> }] : []),
+          { value: 'clips' as const, label: <span className="inline-flex items-center gap-1.5"><Clapperboard className="h-3.5 w-3.5" />Clips</span> }
+        ]}
+      />
+
+      {platform && !showClips && (
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <Segmented
+            label="Platform"
+            variant="underline"
+            value={platform}
+            onChange={setPlatform}
+            options={platforms.map((p) => ({ value: p, label: <span className="inline-flex items-center gap-1.5"><CreatorIcon platform={p} />{CREATOR_PLATFORM_NAMES[p]}</span> }))}
+          />
+          <span className="flex items-center gap-2">
+            {platform === 'youtube' && (
+              <Segmented
+                label="YouTube list"
+                size="sm"
+                value={youtubeKind}
+                onChange={setYoutubeKind}
+                options={[{ value: 'lives', label: 'Lives' }, { value: 'uploads', label: 'Videos' }]}
+              />
+            )}
+            <Button variant="ghost" iconOnly aria-label="Refresh" title="Refresh" icon={<RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />} onClick={() => { void loadFeed(true) }} disabled={loading} />
+          </span>
+        </div>
+      )}
+
+      {showClips || !platform ? (
+        <CreatorClips
+          key={clipsVersion}
+          creator={creator}
+          onOpen={(entry, output) => {
+            setOpenRun({ entry, output })
+            document.getElementById('page-scroll')?.scrollTo({ top: 0 })
+          }}
+          onError={setError}
+          onNavigate={onNavigate}
+        />
+      ) : (
         <>
-          <div className="mt-5 flex items-center justify-between gap-3">
-            <Segmented
-              label="Platform"
-              value={platform}
-              onChange={setPlatform}
-              options={platforms.map((p) => ({ value: p, label: <span className="inline-flex items-center gap-1.5"><CreatorIcon platform={p} />{CREATOR_PLATFORM_NAMES[p]}</span> }))}
-            />
-            <span className="flex items-center gap-2">
-              {platform === 'youtube' && (
-                <Segmented
-                  label="YouTube list"
-                  size="sm"
-                  value={youtubeKind}
-                  onChange={setYoutubeKind}
-                  options={[{ value: 'lives', label: 'Lives' }, { value: 'uploads', label: 'Videos' }]}
-                />
-              )}
-              <Button variant="ghost" iconOnly aria-label="Refresh" title="Refresh" icon={<RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />} onClick={() => { void loadFeed(true) }} disabled={loading} />
-            </span>
-          </div>
 
           {feed?.error && <Callout tone="warning" className="mt-4">{feed.error}</Callout>}
 
@@ -323,8 +385,6 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
             <p className="mt-4 text-sm text-ink-subtle">{platform === 'youtube' && youtubeKind === 'lives' ? 'No streams on their YouTube Live tab. Switch to Videos to see uploads.' : `No videos on ${CREATOR_PLATFORM_NAMES[platform]} yet.`}</p>
           )}
         </>
-      ) : (
-        <p className="mt-6 text-sm text-ink-subtle">Add a YouTube, Twitch or Kick channel to see their videos here.</p>
       )}
       {confirm && <ConfirmDialog request={confirm} onClose={closeConfirm} />}
     </Page>
@@ -356,5 +416,88 @@ function VideoCard({ item, onClip }: { item: FeedItem; onClip: () => void }): Re
         </div>
       </div>
     </article>
+  )
+}
+
+/** Finished runs made for this creator (chosen in Create, or set by "Clip this"), newest first. */
+function CreatorClips({ creator, onOpen, onError, onNavigate }: {
+  creator: Creator
+  onOpen: (entry: HistoryEntry, output: JobOutput) => void
+  onError: (message: string) => void
+  onNavigate: (page: AppPage) => void
+}): React.JSX.Element {
+  const [entries, setEntries] = useState<HistoryEntry[] | null>(null)
+  const [info, setInfo] = useState<HistoryEntry | null>(null)
+  const closeInfo = useCallback(() => setInfo(null), [])
+  const [assigning, setAssigning] = useState<HistoryEntry | null>(null)
+  const closeAssign = useCallback(() => setAssigning(null), [])
+  const [creators, setCreators] = useState<Creator[]>([creator])
+  useEffect(() => { getApi().creators.list().then(setCreators).catch(() => {}) }, [])
+  // Bumped after a reassignment, to list this creator's runs again.
+  const [version, setVersion] = useState(0)
+  const opening = useRef(0)
+
+  useEffect(() => {
+    let cancelled = false
+    getApi().history.list()
+      .then((list) => { if (!cancelled) setEntries(list.filter((entry) => entry.status === 'completed' && entry.creatorId === creator.id)) })
+      .catch((err) => {
+        if (cancelled) return
+        setEntries([])
+        onError(errorMessage(err, 'Could not load the clip library.'))
+      })
+    return () => { cancelled = true }
+  }, [creator.id, onError, version])
+
+  const open = async (entry: HistoryEntry): Promise<void> => {
+    const request = ++opening.current
+    try {
+      const output = await loadRunOutput(entry)
+      if (request === opening.current) onOpen(entry, output)
+    } catch (err) {
+      if (request === opening.current) onError(errorMessage(err, 'Could not open this run.'))
+    }
+  }
+
+  if (entries === null) {
+    return (
+      <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4" aria-busy="true" aria-label="Loading clips">
+        {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="aspect-video rounded-2xl" />)}
+      </div>
+    )
+  }
+  if (entries.length === 0) {
+    return (
+      <EmptyState
+        className="mt-4"
+        icon={<Clapperboard />}
+        title={`No clips for ${creator.name} yet`}
+        description="Use Clip this on one of their videos, or choose them as the Creator when you create clips."
+        action={<Button variant="primary" icon={<Sparkles className="h-4 w-4" />} onClick={() => onNavigate('clip')}>Create clips</Button>}
+      />
+    )
+  }
+  return (
+    <>
+      <p className="mt-4 text-xs text-ink-subtle">
+        {entries.length} run{entries.length === 1 ? '' : 's'} · {entries.reduce((sum, entry) => sum + entry.clipCount, 0)} clips
+      </p>
+      <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+        {entries.map((entry) => (
+          <RunCard
+            key={entry.jobId}
+            entry={entry}
+            onOpen={() => { void open(entry) }}
+            onInfo={() => setInfo(entry)}
+            // Every run here is theirs.
+            creatorName={null}
+            onAssign={() => setAssigning(entry)}
+            onOpenFolder={() => { void getApi().shell.openPath(entry.outputDir) }}
+          />
+        ))}
+      </div>
+      {info && <JobInfoDialog entry={info} onClose={closeInfo} />}
+      {assigning && <AssignCreatorDialog entry={assigning} creators={creators} onClose={closeAssign} onSaved={() => setVersion((v) => v + 1)} />}
+    </>
   )
 }

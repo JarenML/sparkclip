@@ -13,7 +13,7 @@ import {
   preflightCheck,
   type ClipJobConfig
 } from './pipeline-runner'
-import { createRunRecord, finishRunRecord } from './run-history'
+import { createRunRecord, finishRunRecord, setRunCreator } from './run-history'
 import { cancelTrackedJob, dismissJob, enqueueJob, initJobManager, listJobs, liveJobIds } from './job-manager'
 import { logger, getLogFilePath } from './logger'
 import { assertAbsolutePath, assertMediaPath, assertTrustedSender, authorizeMedia, isTrustedExternalUrl, isWebUrl, isWithinDirectory, openAuthorizedMedia } from './security'
@@ -205,7 +205,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const jobId = randomUUID()
     logger.info('job.start.request', { jobId, sourceType: isWebUrl(config.videoUrl) ? 'remote' : 'local', aspectRatio: config.aspectRatio })
     try {
-      createRunRecord(settings.outputDirectory, jobId, config.videoUrl)
+      createRunRecord(settings.outputDirectory, jobId, config.videoUrl, config.creatorId)
     } catch {
       try { finishRunRecord(settings.outputDirectory, jobId, 'failed', 'Could not start this run.') } catch { /* Output folder may be unavailable. */ }
       return { error: 'Could not create the clipping run. Check the output folder and retry.' }
@@ -249,6 +249,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     dismissJob(jobId)
     logger.info('history.delete', { jobId, freedBytes })
     return { freedBytes }
+  })
+
+  handle('history:setCreator', (_event, jobId: unknown, creatorId: unknown) => {
+    if (typeof jobId !== 'string') throw new Error('Invalid run identifier')
+    if (creatorId !== null && !listCreators().some((creator) => creator.id === creatorId)) throw new Error('This creator is no longer in Creators.')
+    setRunCreator(loadSettings().outputDirectory, jobId, creatorId as string | null)
+    return true
   })
 
   handle('share:start', async (_event, outputDir: unknown) => {

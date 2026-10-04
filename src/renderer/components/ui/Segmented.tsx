@@ -14,6 +14,8 @@ interface SegmentedProps<T extends string> {
   options: SegmentedOption<T>[]
   onChange: (value: T) => void
   size?: 'sm' | 'md'
+  /** pill: glass track with a raised pill. underline: plain text tabs, for a choice nested under a pill one. */
+  variant?: 'pill' | 'underline'
   className?: string
 }
 
@@ -35,12 +37,15 @@ export function onRadioKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>): vo
   radios[next].click()
 }
 
-/** Single choice in a glass track; the chosen segment is a raised glass pill. */
-export function Segmented<T extends string>({ label, value, options, onChange, size = 'md', className }: SegmentedProps<T>): React.JSX.Element {
+/** Single choice in a glass track; the chosen segment is a raised glass pill (or underlined, as `underline`). */
+export function Segmented<T extends string>({ label, value, options, onChange, size = 'md', variant = 'pill', className }: SegmentedProps<T>): React.JSX.Element {
+  const underline = variant === 'underline'
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-0.5 rounded-full bg-black/25 p-[3px] shadow-[inset_0_1px_2px_rgb(0_0_0/0.35),inset_0_0_0_1px_rgb(255_255_255/0.07)]',
+        underline
+          ? 'inline-flex items-center gap-4 border-b border-white/[0.07]'
+          : 'inline-flex items-center gap-0.5 rounded-full bg-black/25 p-[3px] shadow-[inset_0_1px_2px_rgb(0_0_0/0.35),inset_0_0_0_1px_rgb(255_255_255/0.07)]',
         className
       )}
       role="radiogroup"
@@ -60,11 +65,14 @@ export function Segmented<T extends string>({ label, value, options, onChange, s
             onKeyDown={onRadioKeyDown}
             onClick={() => onChange(option.value)}
             className={cn(
-              'rounded-full font-medium transition-[background,color,box-shadow] duration-200 ease-out',
-              size === 'sm' ? 'h-6 px-2.5 text-xs' : 'h-7 px-3 text-xs',
-              selected
-                ? 'bg-white/[0.12] text-ink shadow-[inset_0_1px_0_rgb(255_255_255/0.2),inset_0_0_0_1px_rgb(255_255_255/0.1),0_2px_8px_-2px_rgb(0_0_0/0.5)]'
-                : 'text-ink-muted hover:text-ink',
+              underline
+                ? cn('-mb-px border-b-2 pb-2 pt-1 text-xs font-medium transition-[border-color,color] duration-200 ease-out',
+                  selected ? 'border-accent text-ink' : 'border-transparent text-ink-muted hover:border-white/20 hover:text-ink')
+                : cn('rounded-full font-medium transition-[background,color,box-shadow] duration-200 ease-out',
+                  size === 'sm' ? 'h-6 px-2.5 text-xs' : 'h-7 px-3 text-xs',
+                  selected
+                    ? 'bg-white/[0.12] text-ink shadow-[inset_0_1px_0_rgb(255_255_255/0.2),inset_0_0_0_1px_rgb(255_255_255/0.1),0_2px_8px_-2px_rgb(0_0_0/0.5)]'
+                    : 'text-ink-muted hover:text-ink'),
               option.disabled && 'cursor-not-allowed text-ink-faint hover:text-ink-faint'
             )}
           >

@@ -22,6 +22,8 @@ import { Select } from './ui/Select'
 import { isModelId } from '../../shared/openrouter-models'
 import { useModelStore } from '../store/use-model-store'
 import { ModelPicker } from './ModelPicker'
+import { getApi } from '../lib/ipc'
+import type { Creator } from '../../shared/creators'
 
 const DURATIONS = DURATION_OPTIONS
 
@@ -80,8 +82,20 @@ export function buildJobRequest(draft: ClipDraft, trim: { start: number | null; 
     startTimeSeconds: trim.start,
     endTimeSeconds: trim.end,
     bannerPlatform: null,
-    bannerChannelUrl: null
+    bannerChannelUrl: null,
+    ...(draft.creatorId ? { creatorId: draft.creatorId } : {})
   }
+}
+
+/** The creators the user follows, for the Creator choice; empty until loaded or if none. */
+function useCreators(): Creator[] {
+  const [creators, setCreators] = useState<Creator[]>([])
+  useEffect(() => {
+    let cancelled = false
+    getApi().creators.list().then((list) => { if (!cancelled) setCreators(list) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  return creators
 }
 
 interface JobFormProps {
@@ -242,9 +256,27 @@ export function VideoStep({ draft, update, trimError, disabled }: { draft: ClipD
   const typedStart = parseTimecode(draft.trimStart)
   const typedEnd = parseTimecode(draft.trimEnd)
   const asText = (seconds: number | null): string => (seconds == null ? '' : formatTimecode(seconds * 1000))
+  const creators = useCreators()
   return (
     <div className="space-y-3">
       <SourcePicker value={draft.source} onChange={(source) => update({ source })} onDurationChange={setDuration} seek={seek} disabled={disabled} />
+      {(creators.length > 0 || draft.creatorId) && (
+        <SettingRow
+          title="Creator"
+          description="The clips also show on this creator's Clips tab in Creators."
+          control={
+            <Select
+              aria-label="Creator"
+              size="sm"
+              className="w-44"
+              value={draft.creatorId}
+              options={[{ value: '', label: 'No creator' }, ...creators.map(({ id, name }) => ({ value: id, label: name }))]}
+              onChange={(creatorId) => update({ creatorId })}
+              disabled={disabled}
+            />
+          }
+        />
+      )}
       <SettingRow
         title="Clip only part of the video"
         description="Set a start and end time. Leave either empty for an open range."
@@ -544,6 +576,7 @@ export function ReviewStep({ draft, trim, onEdit }: {
   onEdit: (step: WizardStep) => void
 }): React.JSX.Element {
   const active = useActiveJobs()
+  const creators = useCreators()
   const runningCount = active.filter((job) => job.status !== 'queued').length
   const lengths = draft.durations.length === 0
     ? 'Any length'
@@ -565,6 +598,8 @@ export function ReviewStep({ draft, trim, onEdit }: {
     { step: 'captions', label: 'Captions', value: draft.includeCaptions ? CAPTION_PRESET_NAMES[draft.captionPreset] ?? draft.captionPreset : 'Off' },
     { step: 'captions', label: 'Titles', value: TITLE_LANGUAGES.find((language) => language.code === draft.titleLanguage)?.label ?? 'Same as the video' }
   ]
+  if (draft.creatorId) rows.splice(1, 0,
+    { step: 'video', label: 'Creator', value: creators.find((creator) => creator.id === draft.creatorId)?.name ?? 'Chosen creator' })
   if (draft.saveSpace && isStreamVod(draft.source)) rows.splice(1, 0,
     { step: 'video', label: 'Disk', value: 'Save space · 480p to plan, each clip in full quality' })
   if (draft.clippingMode === 'advanced') rows.splice(rows.findIndex((row) => row.label === 'Clips'), 0,

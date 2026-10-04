@@ -241,6 +241,8 @@ test('job validation rejects malformed options and invalid trim intervals', () =
   for (const titleLanguage of ['xx', 'Spanish', '', null, 1]) assert.throws(() => validateJobConfig({ ...job, titleLanguage }), /title language/)
   for (const saveSpace of [true, false, undefined]) assert.doesNotThrow(() => validateJobConfig({ ...job, saveSpace }))
   for (const saveSpace of ['true', 1, null]) assert.throws(() => validateJobConfig({ ...job, saveSpace }), /disk space/)
+  assert.equal(validateJobConfig({ ...job, creatorId: '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21' }).creatorId, '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21')
+  for (const creatorId of ['', '../x', 42, null]) assert.throws(() => validateJobConfig({ ...job, creatorId }), /creator/)
   assert.equal(validateJobConfig({ ...job, videoUrl: 'https://go.twitch.tv/videos/123?t=30s' }).videoUrl, 'https://www.twitch.tv/videos/123')
   for (const videoUrl of ['https://twitch.tv/channel', 'https://clips.twitch.tv/Clip']) assert.throws(() => validateJobConfig({ ...job, videoUrl }), /completed Twitch VOD/)
   assert.equal(validateJobConfig({ ...job, videoUrl: 'https://www.kick.com/ElZeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c?t=30' }).videoUrl, 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c')
@@ -447,6 +449,29 @@ test('library retains unfinished desktop runs and ignores unrelated folders', as
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
 
+test('a finished run can be assigned to a creator and unassigned, including runs from before run records', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridgeclip-library-'))
+  const jobId = '9d69d14f-2b56-414e-b11e-bdb38a0e2878'
+  const creatorId = '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21'
+  fs.mkdirSync(path.join(root, jobId))
+  fs.writeFileSync(path.join(root, jobId, 'job_output.json'), JSON.stringify({ job_id: jobId, clips: [] }))
+  const before = new Date('2026-09-01T10:00:00Z')
+  fs.utimesSync(path.join(root, jobId, 'job_output.json'), before, before)
+  const manager = loadSource('file-manager.ts', { '../shared/job-output': jobOutput, './run-history': runHistory, './tools': { resolveBinary: () => 'ffprobe' } })
+  try {
+    assert.equal((await manager.getJobHistory(root))[0].creatorId, null)
+    runHistory.setRunCreator(root, jobId, creatorId)
+    const [entry] = await manager.getJobHistory(root)
+    assert.equal(entry.creatorId, creatorId)
+    // The new record keeps the run's place in the library.
+    assert.equal(entry.date, before.toISOString())
+    runHistory.setRunCreator(root, jobId, null)
+    assert.equal((await manager.getJobHistory(root))[0].creatorId, null)
+    assert.throws(() => runHistory.setRunCreator(root, jobId, '../x'), /Invalid creator/)
+    assert.throws(() => runHistory.setRunCreator(root, '../escape', creatorId), /Invalid run/)
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
 test('run history persists outcomes, identifies interrupted work, and omits source query data', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridgeclip-history-'))
   const failedId = '4de005c2-1234-4123-8123-567890abcdef'
@@ -463,7 +488,7 @@ test('run history persists outcomes, identifies interrupted work, and omits sour
     }
     runHistory.finishRunRecord(root, failedId, 'failed', 'Audio transcription failed.')
     runHistory.createRunRecord(root, runningId, '/tmp/local-video.mp4')
-    runHistory.createRunRecord(root, cancelledId, '/tmp/cancelled.mp4')
+    runHistory.createRunRecord(root, cancelledId, '/tmp/cancelled.mp4', '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21')
     runHistory.finishRunRecord(root, cancelledId, 'cancelled')
 
     const active = await manager.getJobHistory(root, new Set([runningId]))
@@ -471,6 +496,9 @@ test('run history persists outcomes, identifies interrupted work, and omits sour
     assert.equal(active.find((entry) => entry.jobId === failedId).errorMessage, 'Audio transcription failed.')
     assert.equal(active.find((entry) => entry.jobId === runningId).status, 'running')
     assert.equal(active.find((entry) => entry.jobId === cancelledId).status, 'cancelled')
+    // The run's creator outlives finishing it; runs without one have none.
+    assert.equal(active.find((entry) => entry.jobId === cancelledId).creatorId, '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21')
+    assert.equal(active.find((entry) => entry.jobId === failedId).creatorId, null)
     assert.equal((await manager.getJobHistory(root)).find((entry) => entry.jobId === runningId).status, 'interrupted')
 
     if (fileLinksAvailable) {

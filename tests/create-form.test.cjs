@@ -88,6 +88,9 @@ test('clipping mode is selectable and economy disables paid vision in the submit
   const kick = 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'
   assert.equal(buildJobRequest({ ...draft, source: kick, saveSpace: true }, { start: null, end: null }).saveSpace, true)
   assert.equal('saveSpace' in buildJobRequest({ ...draft, source: kick, saveSpace: false }, { start: null, end: null }), false)
+  // The chosen creator goes with the run, and is left out when none is.
+  assert.equal(buildJobRequest({ ...draft, creatorId: '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21' }, { start: null, end: null }).creatorId, '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21')
+  assert.equal('creatorId' in buildJobRequest({ ...draft, creatorId: '' }, { start: null, end: null }), false)
   assert.equal('saveSpace' in buildJobRequest({ ...draft, saveSpace: true }, { start: null, end: null }), false)
 })
 

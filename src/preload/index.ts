@@ -39,6 +39,8 @@ export interface HistoryEntry {
   finishedAt: string | null
   durationMs: number | null
   errorMessage: string | null
+  /** The followed creator the run's clips belong to, if one was chosen. */
+  creatorId: string | null
 }
 
 export interface ToolStatus {
@@ -131,6 +133,8 @@ export interface BridgeClipAPI {
     getJob: (outputDir: string) => Promise<Record<string, unknown> | null>
     /** Permanently delete a finished run's folder and everything cached for it. */
     delete: (jobId: string) => Promise<{ freedBytes: number }>
+    /** Assign a run's clips to a followed creator, or to none with null. */
+    setCreator: (jobId: string, creatorId: string | null) => Promise<boolean>
   }
   creators: {
     list: () => Promise<Creator[]>
@@ -268,7 +272,8 @@ const api: BridgeClipAPI = {
   history: {
     list: () => ipcRenderer.invoke('history:list'),
     getJob: (outputDir) => ipcRenderer.invoke('history:getJob', outputDir),
-    delete: (jobId) => ipcRenderer.invoke('history:delete', jobId)
+    delete: (jobId) => ipcRenderer.invoke('history:delete', jobId),
+    setCreator: (jobId, creatorId) => ipcRenderer.invoke('history:setCreator', jobId, creatorId)
   },
   creators: {
     list: () => ipcRenderer.invoke('creators:list'),

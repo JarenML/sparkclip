@@ -15,6 +15,8 @@ export interface RunRecord {
   failureCode?: string | null
   failureStage?: string | null
   httpStatus?: number | null
+  /** The followed creator the run's clips belong to. */
+  creatorId?: string
 }
 
 const RUN_FILE = 'run-history.json'
@@ -81,7 +83,8 @@ export function readRunRecord(baseDir: string, jobId: string): RunRecord | null 
         (record.errorMessage !== null && (typeof record.errorMessage !== 'string' || record.errorMessage.length > 300)) ||
         (record.failureCode != null && (typeof record.failureCode !== 'string' || !/^[a-z]+(?:[._][a-z]+)*$/.test(record.failureCode) || record.failureCode.length > 64)) ||
         (record.failureStage != null && !['setup', 'download', 'transcription', 'planning', 'rendering', 'saving', 'uploading'].includes(record.failureStage)) ||
-        (record.httpStatus != null && (!Number.isInteger(record.httpStatus) || record.httpStatus < 100 || record.httpStatus > 599))) return null
+        (record.httpStatus != null && (!Number.isInteger(record.httpStatus) || record.httpStatus < 100 || record.httpStatus > 599)) ||
+        (record.creatorId !== undefined && (typeof record.creatorId !== 'string' || !UUID.test(record.creatorId)))) return null
     return record as RunRecord
   } catch {
     return null
@@ -101,7 +104,7 @@ function writeRunRecord(baseDir: string, record: RunRecord): void {
   }
 }
 
-export function createRunRecord(baseDir: string, jobId: string, source: string): void {
+export function createRunRecord(baseDir: string, jobId: string, source: string, creatorId?: string): void {
   mkdirSync(runDirectory(baseDir, jobId), { recursive: true, mode: 0o700 })
   writeRunRecord(baseDir, {
     jobId,
@@ -109,8 +112,28 @@ export function createRunRecord(baseDir: string, jobId: string, source: string):
     finishedAt: null,
     sourceLabel: sourceLabel(source),
     status: 'running',
-    errorMessage: null
+    errorMessage: null,
+    ...(creatorId ? { creatorId } : {})
   })
+}
+
+/**
+ * Assign a run's clips to a followed creator, or to none with null. A finished
+ * run from before run records existed gets one dated by its result file.
+ */
+export function setRunCreator(baseDir: string, jobId: string, creatorId: string | null): void {
+  if (creatorId !== null && !UUID.test(creatorId)) throw new Error('Invalid creator')
+  let record = readRunRecord(baseDir, jobId)
+  if (!record) {
+    const result = lstatSync(join(checkedDirectory(baseDir, jobId), 'job_output.json'))
+    if (!result.isFile()) throw new Error('This run has no clips')
+    const date = result.mtime.toISOString()
+    record = { jobId, startedAt: date, finishedAt: date, sourceLabel: 'Video source', status: 'completed', errorMessage: null }
+  }
+  const next: RunRecord = { ...record }
+  if (creatorId) next.creatorId = creatorId
+  else delete next.creatorId
+  writeRunRecord(baseDir, next)
 }
 
 export function finishRunRecord(baseDir: string, jobId: string, status: Exclude<StoredRunStatus, 'running'>, errorMessage: string | null = null,

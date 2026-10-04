@@ -27,6 +27,8 @@ export interface ClipJobRequest {
   endTimeSeconds: number | null
   bannerPlatform: string | null
   bannerChannelUrl: string | null
+  /** The followed creator these clips belong to; they show on that creator's Clips tab. */
+  creatorId?: string
 }
 
 /** How many clipping runs the main process lets run at once; the rest wait in a queue. */
