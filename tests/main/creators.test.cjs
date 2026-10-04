@@ -115,6 +115,8 @@ test('YouTube, Twitch and Kick feeds list recent videos, thumbnails and live str
       'https://gql.twitch.tv/gql': () => json({ data: { user: { profileImageURL: 'https://static-cdn.jtvnw.net/p.png', stream: { title: 'IRL', viewersCount: 52000 },
         videos: { edges: [{ node: { id: '2890898173', title: 'VOD', publishedAt: '2026-10-03T17:11:49Z', lengthSeconds: 11122, viewCount: 3568, previewThumbnailURL: 'https://static-cdn.jtvnw.net/t.jpg' } }] } } } }),
       'https://kick.com/api/v2/channels/speed/videos': () => json([{ session_title: 'Kick VOD', start_time: '2026-09-23 03:31:33', duration: 3600000, views: 10, thumbnail: { src: 'https://images.kick.com/t.webp' }, video: { uuid: '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21' } }]),
+      // Another VOD's id 10 s off must not match.
+      'https://kick.com/speed/videos': () => new Response('<script>{"id":"01a0cc51-b918-7000-8000-000000000000"},{"id":"01A0CC51-9208-7921-86FC-339CDD02CEB3","start_time":"2026-09-23T03:31:33Z"}</script>'),
       'https://kick.com/api/v2/channels/speed': () => (kickFailures-- > 0 ? new Response('busy', { status: 429 }) : json({ livestream: null, user: { profile_pic: 'https://files.kick.com/p.webp' } })),
       'https://i.ytimg.com/': image, 'https://yt3.googleusercontent.com/': image, 'https://static-cdn.jtvnw.net/': image, 'https://images.kick.com/': image, 'https://files.kick.com/': image
     })
@@ -146,7 +148,7 @@ test('YouTube, Twitch and Kick feeds list recent videos, thumbnails and live str
 
     const kick = await api.getCreatorFeed(fetchImpl, creator.id, 'kick')
     assert.equal(kick.error, null)
-    assert.deepEqual(kick.items.map((i) => [i.url, i.publishedAt, i.durationSeconds]), [['https://kick.com/speed/videos/9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21', '2026-09-23T03:31:33.000Z', 3600]])
+    assert.deepEqual(kick.items.map((i) => [i.url, i.pageUrl, i.publishedAt, i.durationSeconds]), [['https://kick.com/speed/videos/9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21', 'https://kick.com/speed/videos/01a0cc51-9208-7921-86fc-339cdd02ceb3', '2026-09-23T03:31:33.000Z', 3600]])
     for (const call of calls) assert.equal(call.init.redirect, 'error')
 
     await assert.rejects(api.getCreatorFeed(fetchImpl, creator.id, 'tiktok'), /Unsupported/)
@@ -254,7 +256,7 @@ test('notifications report new videos and going live, but not what was there at 
 
 test('only creator video and channel pages open from a feed', () => {
   const { isCreatorVideoUrl } = load(tempDir().dir)
-  for (const url of ['https://www.youtube.com/watch?v=SOW3qCJJSlQ', 'https://www.youtube.com/shorts/SOW3qCJJSlQ', 'https://www.twitch.tv/videos/2890898173', 'https://www.twitch.tv/ishowspeed', 'https://kick.com/speed/videos/9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21', 'https://kick.com/speed']) {
+  for (const url of ['https://www.youtube.com/watch?v=SOW3qCJJSlQ', 'https://www.youtube.com/shorts/SOW3qCJJSlQ', 'https://www.twitch.tv/videos/2890898173', 'https://www.twitch.tv/ishowspeed', 'https://kick.com/speed/videos/9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21', 'https://kick.com/speed/videos', 'https://kick.com/speed']) {
     assert.equal(isCreatorVideoUrl(url), true, url)
   }
   for (const url of ['http://www.youtube.com/watch?v=SOW3qCJJSlQ', 'https://www.youtube.com/redirect?q=https://evil', 'https://evil.example/watch?v=SOW3qCJJSlQ', 'file:///C:/x', 'https://kick.com/speed/../../x', 'https://www.twitch.tv/videos/1/../../x', 42]) {

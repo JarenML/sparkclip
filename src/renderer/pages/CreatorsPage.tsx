@@ -337,7 +337,7 @@ function VideoCard({ item, onClip }: { item: FeedItem; onClip: () => void }): Re
     <article className="glass flex flex-col rounded-2xl p-1.5">
       <button
         type="button"
-        onClick={() => { void getApi().creators.openVideo(item.url) }}
+        onClick={() => { void getApi().creators.openVideo(item.pageUrl ?? item.url) }}
         aria-label={`Open “${item.title}”`}
         className="relative aspect-video overflow-hidden rounded-xl bg-black/40"
       >
@@ -352,7 +352,7 @@ function VideoCard({ item, onClip }: { item: FeedItem; onClip: () => void }): Re
         {meta && <p className="mt-1 truncate text-2xs text-ink-subtle">{meta}</p>}
         <div className="mt-2 flex gap-1.5">
           <Button size="sm" variant="primary" icon={<Scissors className="h-3.5 w-3.5" />} onClick={onClip}>Clip this</Button>
-          <Button size="sm" variant="ghost" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => { void getApi().creators.openVideo(item.url) }}>Open</Button>
+          <Button size="sm" variant="ghost" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => { void getApi().creators.openVideo(item.pageUrl ?? item.url) }}>Open</Button>
         </div>
       </div>
     </article>

@@ -473,7 +473,7 @@ export function isCreatorVideoUrl(value: unknown): value is string {
     if (url.protocol !== 'https:' || url.username || url.password || url.port) return false
     if (url.hostname === 'www.youtube.com') return /^\/(watch|shorts\/[\w-]{11})$/.test(url.pathname) && (url.pathname !== '/watch' || /^[\w-]{11}$/.test(url.searchParams.get('v') ?? ''))
     if (url.hostname === 'www.twitch.tv') return /^\/(videos\/\d{1,20}|[A-Za-z0-9_]{3,25})$/.test(url.pathname)
-    if (url.hostname === 'kick.com') return /^\/[A-Za-z0-9_-]{2,30}(\/videos\/[0-9a-f-]{36})?$/i.test(url.pathname)
+    if (url.hostname === 'kick.com') return /^\/[A-Za-z0-9_-]{2,30}(\/videos(\/[0-9a-f-]{36})?)?$/i.test(url.pathname)
     return false
   } catch {
     return false

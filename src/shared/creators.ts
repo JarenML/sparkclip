@@ -34,6 +34,8 @@ export interface FeedItem {
   id: string
   title: string
   url: string
+  /** Where Open goes when kick.com can't show `url`: Kick's API only has the video's old id, which its pages no longer open. */
+  pageUrl?: string
   publishedAt: string | null
   durationSeconds: number | null
   views: number | null

@@ -6,7 +6,7 @@ import {
   CREATOR_PLATFORMS, CREATOR_PLATFORM_NAMES, FEED_PLATFORMS, creatorAccount, creatorLink,
   type Creator, type CreatorFeed, type CreatorInput, type CreatorPlatform, type FeedItem, type FeedPlatform, type YoutubeKind
 } from '../shared/creators'
-import { fetchThumbnail, getJson, readCapped, request, TWITCH_CLIENT_ID, type FetchLike } from './source-preview'
+import { fetchThumbnail, getJson, readCapped, request, TWITCH_CLIENT_ID, uuidv7Millis, type FetchLike } from './source-preview'
 
 /**
  * Creators the user follows, stored in userData/creators.json, their latest
@@ -429,10 +429,40 @@ async function kickJson(fetchImpl: FetchLike, url: string): Promise<unknown> {
   throw last
 }
 
+/**
+ * kick.com opens a VOD by a UUIDv7 whose prefix is its start time; the API
+ * only returns the older video uuid, so read the new ids off the channel's
+ * Videos page. None if the page can't be read.
+ */
+async function kickPageIds(fetchImpl: FetchLike, slug: string): Promise<string[]> {
+  try {
+    const page = await text(fetchImpl, `https://kick.com/${encodeURIComponent(slug)}/videos`, MAX_PAGE_BYTES)
+    return [...new Set(page.toLowerCase().match(/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}/g) ?? [])]
+  } catch {
+    return []
+  }
+}
+
+/** The kick.com page of a VOD that started at `startTime`: its listed id within 5 s of that moment, else the channel's Videos tab. */
+function kickPageUrl(slug: string, ids: string[], startTime: unknown): string {
+  const published = date(startTime)
+  const start = published ? Date.parse(published) : NaN
+  let best: string | undefined
+  let bestDelta = 5001
+  for (const id of ids) {
+    const delta = Math.abs((uuidv7Millis(id) ?? -Infinity) - start)
+    if (delta < bestDelta) [best, bestDelta] = [id, delta]
+  }
+  return `https://kick.com/${slug}/videos${best ? `/${best}` : ''}`
+}
+
 async function kickFeed(fetchImpl: FetchLike, creator: StoredCreator): Promise<RawFeed> {
   const slug = creatorAccount(creator.links.kick as string)
   const channel = await kickJson(fetchImpl, `https://kick.com/api/v2/channels/${encodeURIComponent(slug)}`)
-  const vods = await kickJson(fetchImpl, `https://kick.com/api/v2/channels/${encodeURIComponent(slug)}/videos`)
+  const [vods, pageIds] = await Promise.all([
+    kickJson(fetchImpl, `https://kick.com/api/v2/channels/${encodeURIComponent(slug)}/videos`),
+    kickPageIds(fetchImpl, slug)
+  ])
   const list = (Array.isArray(vods) ? vods : []).filter((vod) => /^[0-9a-f-]{36}$/i.test(String(field(vod, 'video', 'uuid'))))
   const stream = field(channel, 'livestream')
   const thumbnail = (vod: unknown): string | null => {
@@ -444,6 +474,7 @@ async function kickFeed(fetchImpl: FetchLike, creator: StoredCreator): Promise<R
     items: list.map((vod) => ({
       id: String(field(vod, 'video', 'uuid')),
       url: `https://kick.com/${slug}/videos/${field(vod, 'video', 'uuid')}`,
+      pageUrl: kickPageUrl(slug, pageIds, field(vod, 'start_time')),
       title: typeof field(vod, 'session_title') === 'string' ? String(field(vod, 'session_title')) : 'Untitled stream',
       publishedAt: date(field(vod, 'start_time')),
       // Kick reports milliseconds.
