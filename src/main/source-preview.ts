@@ -23,11 +23,14 @@ const CACHE_TTL_MS = 10 * 60 * 1000
 // client; the generic token works for every endpoint used here.
 const USER_AGENT = 'Mozilla/5.0'
 // Twitch's public web client id, the same one its site and yt-dlp use.
-const TWITCH_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
+export const TWITCH_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const THUMBNAIL_HOSTS = [
-  /^i\.ytimg\.com$/,
+  // i.ytimg.com and its numbered mirrors (the channel feed uses i1-i9);
+  // yt3.googleusercontent.com serves channel pictures.
+  /^i\d?\.ytimg\.com$/,
+  /^yt3\.googleusercontent\.com$/,
   /^static-cdn\.jtvnw\.net$/,
   /^(images|files)\.kick\.com$/,
   /^kick-[a-z0-9-]+\.s3\.[a-z0-9-]+\.amazonaws\.com$/
@@ -35,7 +38,7 @@ const THUMBNAIL_HOSTS = [
 
 const cache = new Map<string, { at: number; value: Promise<SourcePreviewInfo | null> }>()
 
-async function readCapped(response: Response, limit: number): Promise<Uint8Array> {
+export async function readCapped(response: Response, limit: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'))
   if (Number.isFinite(declared) && declared > limit) throw new Error('Response too large')
   if (!response.body) return new Uint8Array(await response.arrayBuffer())
@@ -61,7 +64,7 @@ async function readCapped(response: Response, limit: number): Promise<Uint8Array
   return out
 }
 
-async function request(fetchImpl: FetchLike, url: string, init: RequestInit = {}): Promise<Response> {
+export async function request(fetchImpl: FetchLike, url: string, init: RequestInit = {}): Promise<Response> {
   const response = await fetchImpl(url, {
     ...init,
     redirect: 'error',
@@ -72,7 +75,7 @@ async function request(fetchImpl: FetchLike, url: string, init: RequestInit = {}
   return response
 }
 
-async function getJson(fetchImpl: FetchLike, url: string, init: RequestInit = {}): Promise<unknown> {
+export async function getJson(fetchImpl: FetchLike, url: string, init: RequestInit = {}): Promise<unknown> {
   const response = await request(fetchImpl, url, { ...init, headers: { Accept: 'application/json', ...(init.headers as Record<string, string> | undefined) } })
   return JSON.parse(new TextDecoder().decode(await readCapped(response, MAX_JSON_BYTES)))
 }

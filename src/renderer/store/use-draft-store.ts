@@ -40,6 +40,8 @@ export interface ClipDraft {
   trimOpen: boolean
   trimStart: string
   trimEnd: string
+  /** The followed creator the clips belong to; empty for none. Goes with the video, so the next video starts without one. */
+  creatorId: string
 }
 
 interface DraftState extends ClipDraft {
@@ -74,11 +76,12 @@ export const useDraftStore = create<DraftState>((set) => ({
   trimOpen: false,
   trimStart: '',
   trimEnd: '',
+  creatorId: '',
   step: 'video',
   started: null,
   update: (patch) => set(patch),
   setStep: (step) => set({ step }),
   clearSource: () => set({ source: '', trimStart: '', trimEnd: '' }),
   markStarted: (started) => set({ started }),
-  startAnother: () => set({ source: '', trimOpen: false, trimStart: '', trimEnd: '', step: 'video', started: null })
+  startAnother: () => set({ source: '', trimOpen: false, trimStart: '', trimEnd: '', creatorId: '', step: 'video', started: null })
 }))

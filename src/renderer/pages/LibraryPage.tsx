@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Clapperboard, Eye, FolderOpen, ListVideo, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { AlertTriangle, Clapperboard, Eye, FolderOpen, ListVideo, RefreshCw, Search, Sparkles, UserRound } from 'lucide-react'
 import { getApi } from '../lib/ipc'
 import { cn, errorMessage, formatRelativeDate, formatUsd, localFileUrl } from '../lib/utils'
 import { clipFilePath, loadThumbnail } from '../lib/thumbnails'
@@ -10,6 +10,8 @@ import type { HistoryEntry } from '../../preload/index'
 import { BackLink, ClipList } from '../components/ClipList'
 import { useDeleteRun } from '../components/DeleteRun'
 import { JobInfoDialog } from '../components/JobInfoDialog'
+import { AssignCreatorDialog } from '../components/AssignCreatorDialog'
+import type { Creator } from '../../shared/creators'
 import { Page } from '../components/ui/Page'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Button } from '../components/ui/Button'
@@ -18,6 +20,15 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { Callout } from '../components/ui/Callout'
 import { Skeleton } from '../components/ui/Skeleton'
 import type { Page as AppPage } from '../components/Sidebar'
+
+/** A finished run's clips, read from disk; throws a message to show when it can't be opened. */
+export async function loadRunOutput(entry: HistoryEntry): Promise<JobOutput> {
+  const output = await getApi().history.getJob(entry.outputDir)
+  if (!output) throw new Error('This run is no longer available. Its files may have moved or been removed.')
+  const parsed = parseJobOutput(output)
+  if (!parsed) throw new Error('This run has an unsupported or damaged result file.')
+  return parsed
+}
 
 export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => void }): React.JSX.Element {
   const outputDirectory = useSettingsStore((s) => s.outputDirectory)
@@ -31,8 +42,12 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
   const [info, setInfo] = useState<HistoryEntry | null>(null)
   const closeInfo = useCallback(() => setInfo(null), [])
   const [refreshing, setRefreshing] = useState(false)
+  const [creators, setCreators] = useState<Creator[]>([])
+  const [assigning, setAssigning] = useState<HistoryEntry | null>(null)
+  const closeAssign = useCallback(() => setAssigning(null), [])
 
   const load = useCallback(async () => {
+    getApi().creators.list().then(setCreators).catch(() => {})
     const request = ++requestId.current
     setRefreshing(true)
     setError(null)
@@ -71,18 +86,9 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
     const request = ++openRequestId.current
     setError(null)
     try {
-      const output = await getApi().history.getJob(entry.outputDir)
+      const output = await loadRunOutput(entry)
       if (request !== openRequestId.current) return
-      if (!output) {
-        setError('This run is no longer available. Its files may have moved or been removed.')
-        return
-      }
-      const parsed = parseJobOutput(output)
-      if (!parsed) {
-        setError('This run has an unsupported or damaged result file.')
-        return
-      }
-      setOpen({ entry, output: parsed })
+      setOpen({ entry, output })
       document.getElementById('page-scroll')?.scrollTo({ top: 0 })
     } catch (err) {
       if (request === openRequestId.current) setError(errorMessage(err, 'Could not open this run.'))
@@ -202,6 +208,8 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
                 entry={entry}
                 onOpen={() => openRun(entry)}
                 onInfo={() => setInfo(entry)}
+                creatorName={creatorName(creators, entry)}
+                onAssign={() => setAssigning(entry)}
                 onOpenFolder={async () => {
                   try {
                     if (!await getApi().shell.openPath(entry.outputDir)) setError('This run folder is no longer available.')
@@ -215,14 +223,23 @@ export function LibraryPage({ onNavigate }: { onNavigate: (page: AppPage) => voi
         )}
       </div>
       {info && <JobInfoDialog entry={info} onClose={closeInfo} />}
+      {assigning && <AssignCreatorDialog entry={assigning} creators={creators} onClose={closeAssign} onSaved={() => { void load() }} />}
     </Page>
   )
 }
 
-function RunCard({ entry, onOpen, onInfo, onOpenFolder }: {
+/** The name of the creator a run is assigned to; null when none, or theirs was removed. */
+export function creatorName(creators: Creator[], entry: HistoryEntry): string | null {
+  return entry.creatorId ? creators.find((creator) => creator.id === entry.creatorId)?.name ?? null : null
+}
+
+export function RunCard({ entry, onOpen, onInfo, onAssign, creatorName, onOpenFolder }: {
   entry: HistoryEntry
   onOpen: () => void
   onInfo: () => void
+  /** Opens Assign to creator. */
+  onAssign: () => void
+  creatorName: string | null
   onOpenFolder: () => void
 }): React.JSX.Element {
   const failed = entry.status !== 'completed'
@@ -272,6 +289,12 @@ function RunCard({ entry, onOpen, onInfo, onOpenFolder }: {
           </p>
           <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-subtle">
             <span>{formatRelativeDate(entry.date)}</span>
+            {creatorName && (
+              <>
+                <span className="text-ink-faint">·</span>
+                <span className="inline-flex min-w-0 items-center gap-1 truncate"><UserRound className="h-3 w-3 shrink-0" />{creatorName}</span>
+              </>
+            )}
             {entry.totalCostUsd != null && (
               <>
                 <span className="text-ink-faint">·</span>
@@ -290,6 +313,17 @@ function RunCard({ entry, onOpen, onInfo, onOpenFolder }: {
       >
         <Eye className="h-4 w-4" />
       </button>
+      {!failed && (
+        <button
+          type="button"
+          onClick={onAssign}
+          aria-label={`Assign ${entry.videoTitle} to a creator`}
+          title={creatorName ? `Creator: ${creatorName}` : 'Assign to creator'}
+          className="glass-chip absolute right-[3.25rem] top-3.5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors hover:bg-white/25"
+        >
+          <UserRound className="h-4 w-4" />
+        </button>
+      )}
     </div>
   )
 }

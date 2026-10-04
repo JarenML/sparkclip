@@ -22,6 +22,8 @@ export interface JobHistoryEntry {
   finishedAt: string | null
   durationMs: number | null
   errorMessage: string | null
+  /** The followed creator the run's clips belong to, if one was chosen. */
+  creatorId: string | null
 }
 
 const MAX_JOB_OUTPUT_BYTES = 20 * 1024 * 1024
@@ -86,7 +88,8 @@ export async function getJobHistory(baseDir: string, activeJobIds: ReadonlySet<s
           totalCostUsd: typeof costVal === 'number' ? costVal : null,
           finishedAt: record?.finishedAt ?? result.modified.toISOString(),
           durationMs: durationMs ?? (typeof data.processing_time_seconds === 'number' ? Math.round(data.processing_time_seconds * 1000) : null),
-          errorMessage: null
+          errorMessage: null,
+          creatorId: record?.creatorId ?? null
         })
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -105,7 +108,7 @@ export async function getJobHistory(baseDir: string, activeJobIds: ReadonlySet<s
                   videoTitle: record?.sourceLabel ?? 'Unfinished run', clipCount: 0,
                   status, outputDir: runDir, totalCostUsd: null,
                   finishedAt: record?.finishedAt ?? null, durationMs,
-                  errorMessage: record?.errorMessage ?? null })
+                  errorMessage: record?.errorMessage ?? null, creatorId: record?.creatorId ?? null })
               }
             } catch { /* The run directory was removed during the scan. */ }
           }
@@ -114,7 +117,7 @@ export async function getJobHistory(baseDir: string, activeJobIds: ReadonlySet<s
         entries.push({ jobId: dir.name, date: record?.startedAt ?? new Date(0).toISOString(), videoTitle: record?.sourceLabel ?? 'Unreadable run', clipCount: 0,
           status: 'failed', outputDir: join(baseDir, dir.name), totalCostUsd: null,
           finishedAt: record?.finishedAt ?? null, durationMs,
-          errorMessage: record?.errorMessage ?? 'The saved result could not be read.' })
+          errorMessage: record?.errorMessage ?? 'The saved result could not be read.', creatorId: record?.creatorId ?? null })
       }
     }
   } catch {

@@ -16,6 +16,7 @@ import type { OpenRouterCatalog } from '../shared/openrouter-models'
 import type { UpdateState } from '../shared/updates'
 import type { SourcePreviewInfo } from '../shared/video-source'
 import type { LanShare } from '../shared/lan-share'
+import type { Creator, CreatorFeed, CreatorInput, CreatorPlatform, FeedPlatform, YoutubeKind } from '../shared/creators'
 
 export interface ClipSettings {
   openrouterConfigured: boolean
@@ -38,6 +39,8 @@ export interface HistoryEntry {
   finishedAt: string | null
   durationMs: number | null
   errorMessage: string | null
+  /** The followed creator the run's clips belong to, if one was chosen. */
+  creatorId: string | null
 }
 
 export interface ToolStatus {
@@ -130,6 +133,26 @@ export interface BridgeClipAPI {
     getJob: (outputDir: string) => Promise<Record<string, unknown> | null>
     /** Permanently delete a finished run's folder and everything cached for it. */
     delete: (jobId: string) => Promise<{ freedBytes: number }>
+    /** Assign a run's clips to a followed creator, or to none with null. */
+    setCreator: (jobId: string, creatorId: string | null) => Promise<boolean>
+  }
+  creators: {
+    list: () => Promise<Creator[]>
+    /** Create a creator, or update one when `id` is given. */
+    save: (input: CreatorInput, id?: string) => Promise<Creator>
+    delete: (id: string) => Promise<boolean>
+    setNotify: (id: string, on: boolean) => Promise<Creator>
+    /** Latest videos on one platform; `refresh` skips the few-minute cache. */
+    feed: (id: string, platform: FeedPlatform, refresh?: boolean, kind?: YoutubeKind) => Promise<CreatorFeed>
+    /** Uploads after now stop counting as new on that tab. */
+    /** The list `feed` returned, with the next older videos added. */
+    more: (id: string, platform: FeedPlatform, kind?: YoutubeKind) => Promise<CreatorFeed>
+    markViewed: (id: string, platform: FeedPlatform) => Promise<boolean>
+    avatar: (id: string) => Promise<string | null>
+    openProfile: (id: string, platform: CreatorPlatform) => Promise<boolean>
+    openVideo: (url: string) => Promise<boolean>
+    /** A notification about this creator was clicked. */
+    onOpen: (callback: (creatorId: string) => void) => () => void
   }
   share: {
     /** Serve a run's clips to phones on this network; replaces any other share. */
@@ -249,7 +272,21 @@ const api: BridgeClipAPI = {
   history: {
     list: () => ipcRenderer.invoke('history:list'),
     getJob: (outputDir) => ipcRenderer.invoke('history:getJob', outputDir),
-    delete: (jobId) => ipcRenderer.invoke('history:delete', jobId)
+    delete: (jobId) => ipcRenderer.invoke('history:delete', jobId),
+    setCreator: (jobId, creatorId) => ipcRenderer.invoke('history:setCreator', jobId, creatorId)
+  },
+  creators: {
+    list: () => ipcRenderer.invoke('creators:list'),
+    save: (input, id) => ipcRenderer.invoke('creators:save', input, id),
+    delete: (id) => ipcRenderer.invoke('creators:delete', id),
+    setNotify: (id, on) => ipcRenderer.invoke('creators:notify', id, on),
+    feed: (id, platform, refresh, kind) => ipcRenderer.invoke('creators:feed', id, platform, refresh === true, kind ?? 'lives'),
+    more: (id, platform, kind) => ipcRenderer.invoke('creators:more', id, platform, kind ?? 'lives'),
+    markViewed: (id, platform) => ipcRenderer.invoke('creators:viewed', id, platform),
+    avatar: (id) => ipcRenderer.invoke('creators:avatar', id),
+    openProfile: (id, platform) => ipcRenderer.invoke('creators:openProfile', id, platform),
+    openVideo: (url) => ipcRenderer.invoke('creators:openVideo', url),
+    onOpen: (callback) => subscribe('creators:open', callback)
   },
   share: {
     start: (outputDir) => ipcRenderer.invoke('share:start', outputDir),

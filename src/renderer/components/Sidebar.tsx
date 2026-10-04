@@ -1,4 +1,4 @@
-import { ChevronRight, Film, Layers, PanelLeftClose, PanelLeftOpen, Send, Settings, UsersRound, WandSparkles, Workflow, type LucideIcon } from 'lucide-react'
+import { ChevronRight, Contact, Film, Layers, PanelLeftClose, PanelLeftOpen, Send, Settings, UsersRound, WandSparkles, Workflow, type LucideIcon } from 'lucide-react'
 import { cn, MOD_KEY, sourceLabel } from '../lib/utils'
 import { useIsWide, useSidebarExpanded, useSidebarStore } from '../store/use-sidebar-store'
 import { useActiveJobs } from '../store/use-job-store'
@@ -10,15 +10,16 @@ import { StatusDot } from './ui/Badge'
 import { STAGE_LABELS } from './JobProgress'
 import { SidebarUpdateButton } from './Updates'
 
-export type Page = 'clip' | 'library' | 'jobs' | 'accounts' | 'posts' | 'automations' | 'settings'
+export type Page = 'clip' | 'library' | 'jobs' | 'creators' | 'accounts' | 'posts' | 'automations' | 'settings'
 
 export const NAV_ITEMS: { id: Page; label: string; icon: LucideIcon; shortcut: string; group: 'studio' | 'app' }[] = [
   { id: 'clip', label: 'Create', icon: WandSparkles, shortcut: '1', group: 'studio' },
   { id: 'library', label: 'Library', icon: Film, shortcut: '2', group: 'studio' },
   { id: 'jobs', label: 'Jobs', icon: Layers, shortcut: '3', group: 'studio' },
-  { id: 'accounts', label: 'Accounts', icon: UsersRound, shortcut: '4', group: 'app' },
-  { id: 'posts', label: 'Posts', icon: Send, shortcut: '5', group: 'app' },
-  { id: 'automations', label: 'Automations', icon: Workflow, shortcut: '6', group: 'app' },
+  { id: 'creators', label: 'Creators', icon: Contact, shortcut: '4', group: 'studio' },
+  { id: 'accounts', label: 'Accounts', icon: UsersRound, shortcut: '5', group: 'app' },
+  { id: 'posts', label: 'Posts', icon: Send, shortcut: '6', group: 'app' },
+  { id: 'automations', label: 'Automations', icon: Workflow, shortcut: '7', group: 'app' },
   { id: 'settings', label: 'Settings', icon: Settings, shortcut: ',', group: 'app' }
 ]
 

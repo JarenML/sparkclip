@@ -15,6 +15,7 @@ import { cancelZernioConnect } from './zernio/service'
 import { isAutomationMedia, startAutomationScheduler } from './automations'
 import { handleStreamRequest, STREAM_PROXY_SCHEME } from './stream-proxy'
 import { stopShare } from './lan-share'
+import { startCreatorWatcher, stopCreatorWatcher } from './creators'
 import { REPO_URL } from '../shared/brand'
 
 // Catch crashes anywhere in the main process so we get a log line instead
@@ -239,6 +240,17 @@ app.whenReady().then(() => {
   registerIpcHandlers(() => mainWindow)
   const stopAutomations = startAutomationScheduler()
   app.on('before-quit', stopAutomations)
+  // New uploads and streams going live from followed creators; clicking a
+  // notification brings the window forward on that creator's profile.
+  startCreatorWatcher((url, init) => net.fetch(url, init), (creatorId) => {
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.send('creators:open', creatorId)
+  })
+  app.on('before-quit', stopCreatorWatcher)
   createWindow()
   initAutoUpdater(() => mainWindow)
 
