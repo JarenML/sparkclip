@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bell, BellOff, ExternalLink, Pencil, Plus, Radio, RefreshCw, Scissors, Trash2, UserRound } from 'lucide-react'
-import { CREATOR_PLATFORMS, CREATOR_PLATFORM_NAMES, FEED_PLATFORMS, creatorAccount, type Creator, type CreatorFeed, type FeedItem, type FeedPlatform } from '../../shared/creators'
+import { CREATOR_PLATFORMS, CREATOR_PLATFORM_NAMES, FEED_PLATFORMS, creatorAccount, type Creator, type CreatorFeed, type FeedItem, type FeedPlatform, type YoutubeKind } from '../../shared/creators'
 import { BackLink } from '../components/ClipList'
 import { CreatorDialog } from '../components/CreatorDialog'
 import { CreatorIcon } from '../components/CreatorIcon'
@@ -155,6 +155,7 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
 }): React.JSX.Element {
   const platforms = useMemo(() => FEED_PLATFORMS.filter((platform) => creator.links[platform]), [creator.links])
   const [platform, setPlatform] = useState<FeedPlatform | null>(platforms[0] ?? null)
+  const [youtubeKind, setYoutubeKind] = useState<YoutubeKind>('lives')
   const [feed, setFeed] = useState<CreatorFeed | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -170,7 +171,7 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
     if (!platform) return
     setLoading(true)
     try {
-      const result = await getApi().creators.feed(creator.id, platform, refresh)
+      const result = await getApi().creators.feed(creator.id, platform, refresh, youtubeKind)
       setFeed(result)
       // What's listed now has been seen: later uploads will show as new.
       if (!result.error) void getApi().creators.markViewed(creator.id, platform)
@@ -179,7 +180,7 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
     } finally {
       setLoading(false)
     }
-  }, [creator.id, platform])
+  }, [creator.id, platform, youtubeKind])
 
   useEffect(() => {
     setFeed(null)
@@ -259,7 +260,18 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
               onChange={setPlatform}
               options={platforms.map((p) => ({ value: p, label: <span className="inline-flex items-center gap-1.5"><CreatorIcon platform={p} />{CREATOR_PLATFORM_NAMES[p]}</span> }))}
             />
-            <Button variant="ghost" iconOnly aria-label="Refresh" title="Refresh" icon={<RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />} onClick={() => { void loadFeed(true) }} disabled={loading} />
+            <span className="flex items-center gap-2">
+              {platform === 'youtube' && (
+                <Segmented
+                  label="YouTube list"
+                  size="sm"
+                  value={youtubeKind}
+                  onChange={setYoutubeKind}
+                  options={[{ value: 'lives', label: 'Lives' }, { value: 'uploads', label: 'Videos' }]}
+                />
+              )}
+              <Button variant="ghost" iconOnly aria-label="Refresh" title="Refresh" icon={<RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />} onClick={() => { void loadFeed(true) }} disabled={loading} />
+            </span>
           </div>
 
           {feed?.error && <Callout tone="warning" className="mt-4">{feed.error}</Callout>}
@@ -285,7 +297,7 @@ function CreatorProfile({ creator, onBack, onEdit, onChanged, onDeleted, onNavig
               : feed.items.map((item) => <VideoCard key={item.id} item={item} onClip={() => clip(item)} />)}
           </div>
           {feed && !feed.error && feed.items.length === 0 && (
-            <p className="mt-4 text-sm text-ink-subtle">No videos on {CREATOR_PLATFORM_NAMES[platform]} yet.</p>
+            <p className="mt-4 text-sm text-ink-subtle">{platform === 'youtube' && youtubeKind === 'lives' ? 'No streams on their YouTube Live tab. Switch to Videos to see uploads.' : `No videos on ${CREATOR_PLATFORM_NAMES[platform]} yet.`}</p>
           )}
         </>
       ) : (

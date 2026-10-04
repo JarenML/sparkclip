@@ -43,8 +43,13 @@ export interface FeedItem {
   isNew: boolean
 }
 
+/** What a YouTube tab lists: past live streams (the channel's Live tab) or uploaded videos. */
+export type YoutubeKind = 'lives' | 'uploads'
+
 export interface CreatorFeed {
   platform: FeedPlatform
+  /** For YouTube, which list this is. */
+  kind?: YoutubeKind
   items: FeedItem[]
   live: { title: string; viewers: number | null; url: string } | null
   avatar: string | null

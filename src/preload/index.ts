@@ -16,7 +16,7 @@ import type { OpenRouterCatalog } from '../shared/openrouter-models'
 import type { UpdateState } from '../shared/updates'
 import type { SourcePreviewInfo } from '../shared/video-source'
 import type { LanShare } from '../shared/lan-share'
-import type { Creator, CreatorFeed, CreatorInput, CreatorPlatform, FeedPlatform } from '../shared/creators'
+import type { Creator, CreatorFeed, CreatorInput, CreatorPlatform, FeedPlatform, YoutubeKind } from '../shared/creators'
 
 export interface ClipSettings {
   openrouterConfigured: boolean
@@ -139,7 +139,7 @@ export interface BridgeClipAPI {
     delete: (id: string) => Promise<boolean>
     setNotify: (id: string, on: boolean) => Promise<Creator>
     /** Latest videos on one platform; `refresh` skips the few-minute cache. */
-    feed: (id: string, platform: FeedPlatform, refresh?: boolean) => Promise<CreatorFeed>
+    feed: (id: string, platform: FeedPlatform, refresh?: boolean, kind?: YoutubeKind) => Promise<CreatorFeed>
     /** Uploads after now stop counting as new on that tab. */
     markViewed: (id: string, platform: FeedPlatform) => Promise<boolean>
     avatar: (id: string) => Promise<string | null>
@@ -273,7 +273,7 @@ const api: BridgeClipAPI = {
     save: (input, id) => ipcRenderer.invoke('creators:save', input, id),
     delete: (id) => ipcRenderer.invoke('creators:delete', id),
     setNotify: (id, on) => ipcRenderer.invoke('creators:notify', id, on),
-    feed: (id, platform, refresh) => ipcRenderer.invoke('creators:feed', id, platform, refresh === true),
+    feed: (id, platform, refresh, kind) => ipcRenderer.invoke('creators:feed', id, platform, refresh === true, kind ?? 'lives'),
     markViewed: (id, platform) => ipcRenderer.invoke('creators:viewed', id, platform),
     avatar: (id) => ipcRenderer.invoke('creators:avatar', id),
     openProfile: (id, platform) => ipcRenderer.invoke('creators:openProfile', id, platform),

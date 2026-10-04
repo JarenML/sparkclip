@@ -269,7 +269,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   handle('creators:save', (_event, input: unknown, id: unknown) => saveCreator(input as CreatorInput, typeof id === 'string' ? id : undefined))
   handle('creators:delete', (_event, id: unknown) => deleteCreator(id))
   handle('creators:notify', (_event, id: unknown, on: unknown) => setCreatorNotify(id, on))
-  handle('creators:feed', (_event, id: unknown, platform: unknown, refresh: unknown) => getCreatorFeed(fetchImpl, id, platform, refresh === true))
+  handle('creators:feed', (_event, id: unknown, platform: unknown, refresh: unknown, kind: unknown) => getCreatorFeed(fetchImpl, id, platform, refresh === true, kind))
   handle('creators:viewed', (_event, id: unknown, platform: unknown) => { markCreatorViewed(id, platform); return true })
   handle('creators:avatar', (_event, id: unknown) => getCreatorAvatar(fetchImpl, id))
   handle('creators:openProfile', async (_event, id: unknown, platform: unknown) => {

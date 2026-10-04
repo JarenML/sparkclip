@@ -14,10 +14,25 @@ function load(dir) {
   })
 }
 
-const rss = (entries) => `<?xml version="1.0"?><feed xmlns:yt="http://www.youtube.com/xml/schemas/2015">${entries.map(([id, title, published]) => `
-  <entry><yt:videoId>${id}</yt:videoId><title>${title}</title><link rel="alternate" href="https://www.youtube.com/watch?v=${id}"/>
-  <published>${published}</published><media:group><media:thumbnail url="https://i4.ytimg.com/vi/${id}/hqdefault.jpg" width="480" height="360"/>
-  <media:community><media:statistics views="1234"/></media:community></media:group></entry>`).join('')}</feed>`
+/** A channel tab page as YouTube serves it: ytInitialData with one lockupViewModel per video. */
+const ytPage = (channel, tab, videos) => {
+  const lockup = ([id, title, badge, ...meta]) => ({ richItemRenderer: { content: { lockupViewModel: {
+    contentId: id, contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+    contentImage: { thumbnailViewModel: {
+      image: { sources: [{ url: `https://i.ytimg.com/vi/${id}/small.jpg` }, { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` }] },
+      overlays: [{ thumbnailBottomOverlayViewModel: { badges: [{ thumbnailBadgeViewModel: { text: badge } }] } }]
+    } },
+    metadata: { lockupMetadataViewModel: { title: { content: title }, metadata: { contentMetadataViewModel: { metadataRows: [{
+      metadataParts: meta.map((label) => ({ text: { content: label }, accessibilityLabel: label }))
+    }] } } } }
+  } } } })
+  const data = { contents: { twoColumnBrowseResultsRenderer: { tabs: [
+    { tabRenderer: { title: 'Home', endpoint: { commandMetadata: { webCommandMetadata: { url: `/${channel}/featured` } } } } },
+    { tabRenderer: { title: tab, selected: true, endpoint: { commandMetadata: { webCommandMetadata: { url: `/${channel}/${tab}` } } },
+      content: { richGridRenderer: { contents: [...videos.map(lockup), { continuationItemRenderer: {} }] } } } }
+  ] } } }
+  return `<html><meta property="og:image" content="https://yt3.googleusercontent.com/avatar=s900">"externalId":"UCWsDFcIhY2DBi3GB5uykGXA"<script>var ytInitialData = ${JSON.stringify(data)};</script></html>`
+}
 
 /** A fetch that serves routes by URL prefix and records each request. */
 function fakeFetch(routes) {
@@ -86,26 +101,39 @@ test('YouTube, Twitch and Kick feeds list recent videos, thumbnails and live str
     const creator = api.saveCreator({ name: 'Speed', links: { youtube: '@IShowSpeed', twitch: 'ishowspeed', kick: 'speed' }, notify: false })
     let kickFailures = 1
     const { fetchImpl, calls } = fakeFetch({
-      'https://www.youtube.com/@IShowSpeed': () => new Response('<html>"externalId":"UCWsDFcIhY2DBi3GB5uykGXA" <meta property="og:image" content="https://yt3.googleusercontent.com/avatar=s900"></html>'),
-      'https://www.youtube.com/feeds/videos.xml?channel_id=UCWsDFcIhY2DBi3GB5uykGXA': () => new Response(rss([['SOW3qCJJSlQ', 'RONALDO RETIRED??? &amp; more', '2026-10-03T20:28:16+00:00'], ['ZmCbmzwQF98', 'Gets A Job at KFC!', '2026-09-27T23:11:52+00:00']])),
+      'https://www.youtube.com/@IShowSpeed/streams': () => new Response(ytPage('@IShowSpeed', 'streams', [
+        ['l1veNowXXXX', 'LIVE IN PARIS', 'LIVE', '52K watching'],
+        ['SOW3qCJJSlQ', 'RONALDO RETIRED??? & more', '3:05:23', '4 million views', 'Streamed 4 hours ago'],
+        ['upcomingXXX', 'Next week', 'UPCOMING', 'Scheduled for 10/10/26'],
+        ['ZmCbmzwQF98', 'Gets A Job at KFC!', '2:10:00', '21,345 views', 'Streamed 6 days ago']
+      ])),
+      'https://www.youtube.com/@IShowSpeed/videos': () => new Response(ytPage('@IShowSpeed', 'videos', [['o1_FvfJD8fg', 'I GOT A JOB AT KFC!', '12:31', '1.9 million views', '6 days ago']])),
       'https://gql.twitch.tv/gql': () => json({ data: { user: { profileImageURL: 'https://static-cdn.jtvnw.net/p.png', stream: { title: 'IRL', viewersCount: 52000 },
         videos: { edges: [{ node: { id: '2890898173', title: 'VOD', publishedAt: '2026-10-03T17:11:49Z', lengthSeconds: 11122, viewCount: 3568, previewThumbnailURL: 'https://static-cdn.jtvnw.net/t.jpg' } }] } } } }),
       'https://kick.com/api/v2/channels/speed/videos': () => json([{ session_title: 'Kick VOD', start_time: '2026-09-23 03:31:33', duration: 3600000, views: 10, thumbnail: { src: 'https://images.kick.com/t.webp' }, video: { uuid: '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21' } }]),
       'https://kick.com/api/v2/channels/speed': () => (kickFailures-- > 0 ? new Response('busy', { status: 429 }) : json({ livestream: null, user: { profile_pic: 'https://files.kick.com/p.webp' } })),
-      'https://i4.ytimg.com/': image, 'https://yt3.googleusercontent.com/': image, 'https://static-cdn.jtvnw.net/': image, 'https://images.kick.com/': image, 'https://files.kick.com/': image
+      'https://i.ytimg.com/': image, 'https://yt3.googleusercontent.com/': image, 'https://static-cdn.jtvnw.net/': image, 'https://images.kick.com/': image, 'https://files.kick.com/': image
     })
 
+    // YouTube lists the Live tab by default: past streams, and the one on now.
     const youtube = await api.getCreatorFeed(fetchImpl, creator.id, 'youtube')
     assert.equal(youtube.error, null)
-    assert.deepEqual(youtube.items.map((i) => [i.id, i.title, i.url, i.views]), [
-      ['SOW3qCJJSlQ', 'RONALDO RETIRED??? & more', 'https://www.youtube.com/watch?v=SOW3qCJJSlQ', 1234],
-      ['ZmCbmzwQF98', 'Gets A Job at KFC!', 'https://www.youtube.com/watch?v=ZmCbmzwQF98', 1234]
-    ])
+    assert.equal(youtube.kind, 'lives')
+    assert.deepEqual(youtube.items.map((i) => [i.id, i.title, i.url, i.durationSeconds, i.views]), [
+      ['SOW3qCJJSlQ', 'RONALDO RETIRED??? & more', 'https://www.youtube.com/watch?v=SOW3qCJJSlQ', 11123, 4000000],
+      ['ZmCbmzwQF98', 'Gets A Job at KFC!', 'https://www.youtube.com/watch?v=ZmCbmzwQF98', 7800, 21345]
+    ], 'the stream on now and the scheduled one are not in the list')
+    const hoursAgo = (Date.now() - Date.parse(youtube.items[0].publishedAt)) / 3_600_000
+    assert.ok(hoursAgo > 3.9 && hoursAgo < 4.1)
+    assert.deepEqual(youtube.live, { title: 'LIVE IN PARIS', viewers: 52000, url: 'https://www.youtube.com/watch?v=l1veNowXXXX' })
     assert.match(youtube.items[0].thumbnail, /^data:image\/jpeg;base64,/)
+    assert.ok(calls.some((c) => c.url === 'https://i.ytimg.com/vi/SOW3qCJJSlQ/hqdefault.jpg'), 'the largest thumbnail is used')
     assert.match(youtube.avatar, /^data:image\/jpeg;base64,/)
-    // The channel page is read once; later feeds go straight to the channel's feed.
-    await api.getCreatorFeed(fetchImpl, creator.id, 'youtube', true)
-    assert.equal(calls.filter((c) => c.url === 'https://www.youtube.com/@IShowSpeed').length, 1)
+
+    const uploads = await api.getCreatorFeed(fetchImpl, creator.id, 'youtube', false, 'uploads')
+    assert.equal(uploads.kind, 'uploads')
+    assert.deepEqual(uploads.items.map((i) => [i.id, i.durationSeconds, i.views]), [['o1_FvfJD8fg', 751, 1900000]])
+    assert.equal(uploads.live, null)
 
     const twitch = await api.getCreatorFeed(fetchImpl, creator.id, 'twitch')
     assert.deepEqual(twitch.items.map((i) => [i.url, i.durationSeconds, i.views]), [['https://www.twitch.tv/videos/2890898173', 11122, 3568]])
@@ -121,23 +149,35 @@ test('YouTube, Twitch and Kick feeds list recent videos, thumbnails and live str
     const broken = await api.getCreatorFeed(async () => { throw new Error('offline') }, creator.id, 'youtube', true)
     assert.match(broken.error, /Couldn't load YouTube/)
     assert.equal(broken.items.length, 2, 'the last good list stays visible')
+
+    // A channel that never streamed has no Live tab: YouTube serves its Home page.
+    const home = ytPage('@IShowSpeed', 'featured', [['o1_FvfJD8fg', 'I GOT A JOB AT KFC!', '12:31', '1.9 million views', '6 days ago']])
+    const none = await api.getCreatorFeed(async () => new Response(home), creator.id, 'youtube', true)
+    assert.deepEqual([none.error, none.items.length, none.live], [null, 0, null])
   } finally { cleanup() }
 })
 
-test('uploads after the tab was last opened are new', async () => {
+test('streams that appear after the tab was last opened are new', async () => {
   const { dir, cleanup } = tempDir()
   try {
     const api = load(dir)
     const creator = api.saveCreator({ name: 'Speed', links: { youtube: 'youtube.com/channel/UCWsDFcIhY2DBi3GB5uykGXA' }, notify: false })
+    const channel = 'channel/UCWsDFcIhY2DBi3GB5uykGXA'
+    let streams = [['ZmCbmzwQF98', 'Last week', '1:00:00', '10 views', 'Streamed 1 week ago']]
     const { fetchImpl } = fakeFetch({
-      'https://www.youtube.com/feeds/': () => new Response(rss([['SOW3qCJJSlQ', 'Today', new Date(Date.now() + 60_000).toISOString()], ['ZmCbmzwQF98', 'Last week', '2026-09-27T23:11:52+00:00']])),
-      'https://i4.ytimg.com/': image
+      [`https://www.youtube.com/${channel}/streams`]: () => new Response(ytPage(channel, 'streams', streams)),
+      [`https://www.youtube.com/${channel}/videos`]: () => new Response(ytPage(channel, 'videos', [['o1_FvfJD8fg', 'Upload', '12:31', '10 views', '6 days ago']])),
+      'https://i.ytimg.com/': image, 'https://yt3.googleusercontent.com/': image
     })
     let feed = await api.getCreatorFeed(fetchImpl, creator.id, 'youtube')
-    assert.deepEqual(feed.items.map((i) => i.isNew), [false, false], 'nothing is new before the first visit')
+    assert.deepEqual(feed.items.map((i) => i.isNew), [false], 'nothing is new before the first visit')
     api.markCreatorViewed(creator.id, 'youtube')
-    feed = await api.getCreatorFeed(fetchImpl, creator.id, 'youtube')
+    // A stream that ended hours ago but wasn't listed at the visit is still new: YouTube's dates are only "N hours ago".
+    streams = [['SOW3qCJJSlQ', 'Today', '1:00:00', '10 views', 'Streamed 5 hours ago'], ...streams]
+    feed = await api.getCreatorFeed(fetchImpl, creator.id, 'youtube', true)
     assert.deepEqual(feed.items.map((i) => i.isNew), [true, false])
+    feed = await api.getCreatorFeed(fetchImpl, creator.id, 'youtube', false, 'uploads')
+    assert.deepEqual(feed.items.map((i) => i.isNew), [false], 'a list never opened has nothing new')
   } finally { cleanup() }
 })
 
@@ -156,7 +196,7 @@ test('notifications report new videos and going live, but not what was there at 
     videos = [{ id: '2', title: 'New VOD' }, ...videos]
     stream = { title: 'Going live', viewersCount: 10 }
     assert.deepEqual(await api.checkCreators(fetchImpl), [
-      { creatorId: followed.id, title: 'Speed posted on Twitch', body: 'New VOD' },
+      { creatorId: followed.id, title: 'New Twitch stream from Speed', body: 'New VOD' },
       { creatorId: followed.id, title: 'Speed is live on Twitch', body: 'Going live' }
     ])
     assert.deepEqual(await api.checkCreators(fetchImpl), [], 'each upload and stream is announced once')

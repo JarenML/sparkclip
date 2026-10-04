@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from 'path'
 import {
   CREATOR_PLATFORMS, CREATOR_PLATFORM_NAMES, FEED_PLATFORMS, creatorAccount, creatorLink,
-  type Creator, type CreatorFeed, type CreatorInput, type CreatorPlatform, type FeedItem, type FeedPlatform
+  type Creator, type CreatorFeed, type CreatorInput, type CreatorPlatform, type FeedItem, type FeedPlatform, type YoutubeKind
 } from '../shared/creators'
 import { fetchThumbnail, getJson, readCapped, request, TWITCH_CLIENT_ID, type FetchLike } from './source-preview'
 
@@ -21,8 +21,12 @@ import { fetchThumbnail, getJson, readCapped, request, TWITCH_CLIENT_ID, type Fe
 interface StoredCreator extends Creator {
   /** YouTube channel id resolved from an @handle, so the page is read once. */
   youtubeChannelId?: string
-  /** When each platform's tab was last opened: later uploads are "new". */
-  viewedAt: Partial<Record<FeedPlatform, string>>
+  /**
+   * Item ids listed when each platform's tab was last opened: anything else
+   * that shows up later is "new". Ids, not dates: YouTube only says
+   * "4 hours ago".
+   */
+  seen: Partial<Record<FeedPlatform, string[]>>
   /** Item ids already notified about, per platform. */
   known: Partial<Record<FeedPlatform, string[]>>
   /** Whether the creator was live at the last check, per platform. */
@@ -39,7 +43,6 @@ const FEED_TTL_MS = 10 * 60 * 1000
 const CHECK_EVERY_MS = 15 * 60 * 1000
 const FIRST_CHECK_MS = 60 * 1000
 const MAX_PAGE_BYTES = 4 * 1024 * 1024
-const MAX_FEED_BYTES = 2 * 1024 * 1024
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 let cache: StoredCreator[] | null = null
@@ -63,7 +66,7 @@ function load(): StoredCreator[] {
     const data = JSON.parse(readFileSync(storePath(), 'utf8')) as { creators?: unknown[] }
     cache = (Array.isArray(data.creators) ? data.creators : []).filter(validStored).slice(0, MAX_CREATORS).map((c) => ({
       ...c,
-      viewedAt: c.viewedAt && typeof c.viewedAt === 'object' ? c.viewedAt : {},
+      seen: c.seen && typeof c.seen === 'object' ? c.seen : {},
       known: c.known && typeof c.known === 'object' ? c.known : {},
       live: c.live && typeof c.live === 'object' ? c.live : {}
     }))
@@ -120,7 +123,7 @@ export function saveCreator(input: CreatorInput, id?: string): Creator {
     if (creator.links.youtube !== links.youtube) delete creator.youtubeChannelId
     if (JSON.stringify(creator.links) !== JSON.stringify(links)) delete creator.avatarUrl
     for (const platform of FEED_PLATFORMS) {
-      if (creator.links[platform] !== links[platform]) { delete creator.known[platform]; delete creator.live[platform]; delete creator.viewedAt[platform] }
+      if (creator.links[platform] !== links[platform]) { delete creator.known[platform]; delete creator.live[platform]; delete creator.seen[platform] }
     }
     Object.assign(creator, { name, links, notify })
     clearFeeds(creator.id)
@@ -128,7 +131,7 @@ export function saveCreator(input: CreatorInput, id?: string): Creator {
     return publicCreator(creator)
   }
   if (creators.length >= MAX_CREATORS) throw new Error(`You can follow up to ${MAX_CREATORS} creators.`)
-  const creator: StoredCreator = { id: randomUUID(), name, links, notify, createdAt: new Date().toISOString(), viewedAt: {}, known: {}, live: {} }
+  const creator: StoredCreator = { id: randomUUID(), name, links, notify, createdAt: new Date().toISOString(), seen: {}, known: {}, live: {} }
   creators.push(creator)
   save()
   return publicCreator(creator)
@@ -158,11 +161,12 @@ export function creatorProfileLink(id: unknown, platform: unknown): string | nul
   return CREATOR_PLATFORMS.includes(platform as CreatorPlatform) ? creator.links[platform as CreatorPlatform] ?? null : null
 }
 
-/** Remembers that a platform's tab was seen now: later uploads show as new. */
+/** Remembers what a platform's tab lists now: anything posted later shows as new. */
 export function markCreatorViewed(id: unknown, platform: unknown): void {
   if (!FEED_PLATFORMS.includes(platform as FeedPlatform)) return
   const creator = find(id)
-  creator.viewedAt[platform as FeedPlatform] = new Date().toISOString()
+  const listed = [...feeds.entries()].filter(([key]) => key.startsWith(`${creator.id}:${platform}:`)).flatMap(([, { feed }]) => feed.items.map((item) => item.id))
+  creator.seen[platform as FeedPlatform] = [...new Set([...listed, ...(creator.seen[platform as FeedPlatform] ?? [])])].slice(0, MAX_KNOWN * 2)
   save()
 }
 
@@ -187,19 +191,6 @@ async function text(fetchImpl: FetchLike, url: string, limit: number, headers: R
   return new TextDecoder().decode(await readCapped(await request(fetchImpl, url, { headers }), limit))
 }
 
-function decodeXml(value: string): string {
-  return value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-}
-
-function tag(xml: string, pattern: RegExp): string | null {
-  const match = pattern.exec(xml)
-  return match ? decodeXml(match[1]).trim() : null
-}
-
 function count(value: unknown): number | null {
   const number = typeof value === 'string' ? Number(value) : value
   return typeof number === 'number' && Number.isFinite(number) && number >= 0 ? number : null
@@ -221,45 +212,118 @@ function field(value: unknown, ...path: string[]): unknown {
   return current
 }
 
-/** Parses a YouTube channel's Atom feed (its 15 latest uploads). */
-export function parseYoutubeFeed(xml: string): RawFeed['items'] {
-  return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].slice(0, FEED_ITEMS).flatMap(([, entry]) => {
-    const id = tag(entry, /<yt:videoId>([^<]+)<\/yt:videoId>/)
-    if (!id || !/^[\w-]{11}$/.test(id)) return []
-    const link = tag(entry, /<link rel="alternate" href="([^"]+)"/)
-    const url = link && /^https:\/\/www\.youtube\.com\/(watch\?v=|shorts\/)[\w-]{11}$/.test(link) ? link : `https://www.youtube.com/watch?v=${id}`
-    return [{
-      id, url,
-      title: tag(entry, /<title>([\s\S]*?)<\/title>/) ?? 'Untitled video',
-      publishedAt: date(tag(entry, /<published>([^<]+)<\/published>/)),
-      durationSeconds: null,
-      views: count(tag(entry, /<media:statistics views="(\d+)"/))
-    }]
-  })
+const UNIT_MS: Record<string, number> = {
+  second: 1000, minute: 60_000, hour: 3_600_000, day: 86_400_000, week: 604_800_000, month: 2_592_000_000, year: 31_536_000_000
 }
 
-/** Thumbnail URLs for the parsed YouTube entries, in the same order. */
-function youtubeThumbnails(xml: string): (string | null)[] {
-  return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].slice(0, FEED_ITEMS)
-    .filter(([, entry]) => /<yt:videoId>[\w-]{11}<\/yt:videoId>/.test(entry))
-    .map(([, entry]) => tag(entry, /<media:thumbnail url="([^"]+)"/))
+/** "Streamed 4 hours ago" → that moment, roughly; null for anything else. */
+export function relativeDate(value: string, now = Date.now()): string | null {
+  const match = /(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i.exec(value)
+  return match ? new Date(now - Number(match[1]) * UNIT_MS[match[2].toLowerCase()]).toISOString() : null
 }
 
-async function youtubeFeed(fetchImpl: FetchLike, creator: StoredCreator): Promise<RawFeed> {
-  const link = creator.links.youtube as string
-  let channelId = /\/channel\/(UC[\w-]{22})$/.exec(link)?.[1] ?? creator.youtubeChannelId
-  let avatar: string | null = null
-  if (!channelId) {
-    // An @handle has no feed of its own: its page names the channel.
-    const page = await text(fetchImpl, link, MAX_PAGE_BYTES, { 'Accept-Language': 'en' })
-    channelId = (/"externalId":"(UC[\w-]{22})"/.exec(page) ?? /<meta itemprop="identifier" content="(UC[\w-]{22})"/.exec(page))?.[1]
-    if (!channelId) throw new Error('YouTube channel not found')
-    avatar = /<meta property="og:image" content="([^"]+)"/.exec(page)?.[1] ?? null
+/** "3:05:23" → seconds. */
+function clockSeconds(value: string): number | null {
+  if (!/^\d{1,3}(:\d{2}){1,2}$/.test(value.trim())) return null
+  return value.trim().split(':').reduce((total, part) => total * 60 + Number(part), 0)
+}
+
+/** "4 million views", "21,345 views", "12K watching" → a count. */
+function spokenCount(value: string): number | null {
+  const match = /([\d.,]+)\s*(thousand|million|billion|K|M|B)?\b/i.exec(value)
+  if (!match) return /\bno views\b/i.test(value) ? 0 : null
+  const scale = ({ thousand: 1e3, k: 1e3, million: 1e6, m: 1e6, billion: 1e9, b: 1e9 } as Record<string, number>)[(match[2] ?? '').toLowerCase()] ?? 1
+  const number = Number(match[1].replace(/,/g, ''))
+  return Number.isFinite(number) ? Math.round(number * scale) : null
+}
+
+function texts(value: unknown): string[] {
+  const out: string[] = []
+  const walk = (node: unknown): void => {
+    if (typeof node === 'string') out.push(node)
+    else if (Array.isArray(node)) node.forEach(walk)
+    else if (node && typeof node === 'object') Object.values(node).forEach(walk)
+  }
+  walk(value)
+  return out
+}
+
+function list(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+/**
+ * The videos on a YouTube channel tab page (Live or Videos). The page embeds
+ * its data as ytInitialData; both its current item format (lockupViewModel)
+ * and the older one (videoRenderer) are read. A channel without the tab
+ * gets its Home page instead, which lists nothing here.
+ */
+export function parseYoutubeTab(html: string, tab: YoutubeTab, now = Date.now()): RawFeed & { channelId: string | null } {
+  const channelId = (/"externalId":"(UC[\w-]{22})"/.exec(html) ?? /<meta itemprop="identifier" content="(UC[\w-]{22})"/.exec(html))?.[1] ?? null
+  const avatar = /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1] ?? null
+  const json = /var ytInitialData = (\{[\s\S]*?\});<\/script>/.exec(html)?.[1]
+  if (!json) throw new Error('YouTube page has no data')
+  const data = JSON.parse(json) as unknown
+  const selected = list(field(data, 'contents', 'twoColumnBrowseResultsRenderer', 'tabs'))
+    .map((tab) => field(tab, 'tabRenderer'))
+    .find((renderer) => field(renderer, 'selected') === true)
+  const selectedUrl = String(field(selected, 'endpoint', 'commandMetadata', 'webCommandMetadata', 'url') ?? '')
+  const contents = selectedUrl.endsWith(`/${tab}`) ? field(selected, 'content', 'richGridRenderer', 'contents') : []
+  const items: RawFeed['items'] = []
+  const thumbnails: (string | null)[] = []
+  let live: RawFeed['live'] = null
+  for (const entry of list(contents)) {
+    const content = field(entry, 'richItemRenderer', 'content')
+    const lockup = field(content, 'lockupViewModel')
+    const renderer = field(content, 'videoRenderer')
+    let id: unknown, title: unknown, badge = '', meta: string[] = [], thumbs: unknown
+    if (lockup && field(lockup, 'contentType') === 'LOCKUP_CONTENT_TYPE_VIDEO') {
+      id = field(lockup, 'contentId')
+      title = field(lockup, 'metadata', 'lockupMetadataViewModel', 'title', 'content')
+      const badges = list(field(lockup, 'contentImage', 'thumbnailViewModel', 'overlays')).map((o) => field(o, 'thumbnailBottomOverlayViewModel', 'badges'))
+      badge = texts(badges).find((t) => /^(LIVE|UPCOMING|\d{1,3}(:\d{2}){1,2})$/i.test(t.trim()))?.trim() ?? ''
+      meta = list(field(lockup, 'metadata', 'lockupMetadataViewModel', 'metadata', 'contentMetadataViewModel', 'metadataRows'))
+        .flatMap((row) => list(field(row, 'metadataParts')))
+        .map((part) => String(field(part, 'accessibilityLabel') ?? field(part, 'text', 'content') ?? ''))
+      thumbs = field(lockup, 'contentImage', 'thumbnailViewModel', 'image', 'sources')
+    } else if (renderer) {
+      id = field(renderer, 'videoId')
+      title = field(renderer, 'title', 'runs', '0', 'text') ?? field(renderer, 'title', 'simpleText')
+      const length = field(renderer, 'lengthText', 'simpleText')
+      badge = typeof length === 'string' ? length : JSON.stringify(field(renderer, 'badges') ?? '').includes('LIVE') ? 'LIVE' : ''
+      meta = [texts(field(renderer, 'viewCountText')).join(''), texts(field(renderer, 'publishedTimeText')).join('')]
+      thumbs = field(renderer, 'thumbnail', 'thumbnails')
+    } else continue
+    if (typeof id !== 'string' || !/^[\w-]{11}$/.test(id)) continue
+    const name = typeof title === 'string' && title.trim() ? title.trim() : tab === 'streams' ? 'Untitled stream' : 'Untitled video'
+    const url = `https://www.youtube.com/watch?v=${id}`
+    if (/^LIVE$/i.test(badge)) {
+      live ??= { title: name, viewers: spokenCount(meta.find((m) => /watching/i.test(m)) ?? ''), url }
+      continue
+    }
+    const publishedAt = meta.map((m) => relativeDate(m, now)).find(Boolean) ?? null
+    // Scheduled streams have neither a length nor a date yet.
+    if (/^UPCOMING$/i.test(badge) || (!publishedAt && clockSeconds(badge) == null)) continue
+    const sources = list(thumbs)
+    const thumbnail = field(sources[sources.length - 1], 'url')
+    items.push({ id, url, title: name, publishedAt, durationSeconds: clockSeconds(badge), views: spokenCount(meta.find((m) => /view/i.test(m)) ?? '') })
+    thumbnails.push(typeof thumbnail === 'string' ? thumbnail : null)
+    if (items.length >= FEED_ITEMS) break
+  }
+  return { items, thumbnails, live, avatar, channelId }
+}
+
+type YoutubeTab = 'streams' | 'videos'
+
+/** A channel tab: Live (its streams, and whether one is on now) or Videos (its uploads). */
+async function youtubeTab(fetchImpl: FetchLike, creator: StoredCreator, tab: YoutubeTab): Promise<RawFeed> {
+  const page = await text(fetchImpl, `${creator.links.youtube}/${tab}`, MAX_PAGE_BYTES, { 'Accept-Language': 'en' })
+  const { channelId, ...feed } = parseYoutubeTab(page, tab)
+  if (channelId && channelId !== creator.youtubeChannelId) {
     creator.youtubeChannelId = channelId
     save()
   }
-  const xml = await text(fetchImpl, `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`, MAX_FEED_BYTES)
-  return { items: parseYoutubeFeed(xml), thumbnails: youtubeThumbnails(xml), live: null, avatar }
+  return feed
 }
 
 async function twitchFeed(fetchImpl: FetchLike, creator: StoredCreator): Promise<RawFeed> {
@@ -335,8 +399,10 @@ async function kickFeed(fetchImpl: FetchLike, creator: StoredCreator): Promise<R
   }
 }
 
+// YouTube reads the Live tab: streams are what gets clipped. Uploads stay
+// available as a second YouTube list.
 const READERS: Record<FeedPlatform, (fetchImpl: FetchLike, creator: StoredCreator) => Promise<RawFeed>> = {
-  youtube: youtubeFeed, twitch: twitchFeed, kick: kickFeed
+  youtube: (fetchImpl, creator) => youtubeTab(fetchImpl, creator, 'streams'), twitch: twitchFeed, kick: kickFeed
 }
 
 async function image(fetchImpl: FetchLike, url: string | null): Promise<string | null> {
@@ -348,22 +414,26 @@ async function image(fetchImpl: FetchLike, url: string | null): Promise<string |
   return data
 }
 
-/** A creator's latest videos on one platform, cached for a few minutes. */
-export async function getCreatorFeed(fetchImpl: FetchLike, id: unknown, platform: unknown, refresh = false): Promise<CreatorFeed> {
+/** A creator's latest videos on one platform, cached for a few minutes. YouTube lists live streams unless `kind` is 'uploads'. */
+export async function getCreatorFeed(fetchImpl: FetchLike, id: unknown, platform: unknown, refresh = false, kind: unknown = 'lives'): Promise<CreatorFeed> {
   if (!FEED_PLATFORMS.includes(platform as FeedPlatform)) throw new Error('Unsupported platform')
   const creator = find(id)
   const feedPlatform = platform as FeedPlatform
   if (!creator.links[feedPlatform]) throw new Error(`This creator has no ${CREATOR_PLATFORM_NAMES[feedPlatform]} link.`)
-  const key = `${creator.id}:${feedPlatform}`
+  const youtubeKind: YoutubeKind | undefined = feedPlatform === 'youtube' ? (kind === 'uploads' ? 'uploads' : 'lives') : undefined
+  const read = youtubeKind === 'uploads' ? (f: FetchLike, c: StoredCreator) => youtubeTab(f, c, 'videos') : READERS[feedPlatform]
+  const kindField = youtubeKind ? { kind: youtubeKind } : {}
+  const key = `${creator.id}:${feedPlatform}:${youtubeKind ?? ''}`
   const cached = feeds.get(key)
-  const viewed = creator.viewedAt[feedPlatform]
-  const withNew = (feed: CreatorFeed): CreatorFeed => ({
-    ...feed,
-    items: feed.items.map((item) => ({ ...item, isNew: !!viewed && !!item.publishedAt && item.publishedAt > viewed }))
-  })
+  const seen = creator.seen[feedPlatform]
+  // A list none of whose items were seen was never opened (YouTube's other list): nothing in it is "new".
+  const withNew = (feed: CreatorFeed): CreatorFeed => {
+    const opened = !!seen && feed.items.some((item) => seen.includes(item.id))
+    return { ...feed, items: feed.items.map((item) => ({ ...item, isNew: opened && !seen.includes(item.id) })) }
+  }
   if (cached && !refresh && Date.now() - cached.at < FEED_TTL_MS) return withNew(cached.feed)
   try {
-    const raw = await READERS[feedPlatform](fetchImpl, creator)
+    const raw = await read(fetchImpl, creator)
     const thumbnails: (string | null)[] = []
     for (let i = 0; i < raw.items.length; i += 4) {
       thumbnails.push(...await Promise.all(raw.thumbnails.slice(i, i + 4).map((url) => image(fetchImpl, url))))
@@ -374,6 +444,7 @@ export async function getCreatorFeed(fetchImpl: FetchLike, id: unknown, platform
     }
     const feed: CreatorFeed = {
       platform: feedPlatform,
+      ...kindField,
       items: raw.items.map((item, i) => ({ ...item, thumbnail: thumbnails[i] ?? null, isNew: false })),
       live: raw.live,
       avatar: await image(fetchImpl, raw.avatar ?? creator.avatarUrl ?? null),
@@ -385,7 +456,7 @@ export async function getCreatorFeed(fetchImpl: FetchLike, id: unknown, platform
   } catch {
     const fallback = cached?.feed
     return {
-      ...(fallback ? withNew(fallback) : { platform: feedPlatform, items: [], live: null, avatar: null, fetchedAt: new Date().toISOString() }),
+      ...(fallback ? withNew(fallback) : { platform: feedPlatform, ...kindField, items: [], live: null, avatar: null, fetchedAt: new Date().toISOString() }),
       error: `Couldn't load ${CREATOR_PLATFORM_NAMES[feedPlatform]} right now. Check your connection and try again.`
     }
   }
@@ -430,8 +501,9 @@ export async function checkCreators(fetchImpl: FetchLike): Promise<CreatorUpdate
         const name = CREATOR_PLATFORM_NAMES[platform]
         const known = creator.known[platform]
         const fresh = known ? raw.items.filter((item) => !known.includes(item.id)) : []
-        if (fresh.length === 1) updates.push({ creatorId: creator.id, title: `${creator.name} posted on ${name}`, body: fresh[0].title })
-        else if (fresh.length > 1) updates.push({ creatorId: creator.id, title: `${creator.name} posted ${fresh.length} videos on ${name}`, body: fresh[0].title })
+        // Every list read here is of streams (YouTube's Live tab, Twitch and Kick VODs).
+        if (fresh.length === 1) updates.push({ creatorId: creator.id, title: `New ${name} stream from ${creator.name}`, body: fresh[0].title })
+        else if (fresh.length > 1) updates.push({ creatorId: creator.id, title: `${fresh.length} new ${name} streams from ${creator.name}`, body: fresh[0].title })
         creator.known[platform] = [...new Set([...raw.items.map((item) => item.id), ...(known ?? [])])].slice(0, MAX_KNOWN)
         if (raw.live && creator.live[platform] === false) updates.push({ creatorId: creator.id, title: `${creator.name} is live on ${name}`, body: raw.live.title })
         creator.live[platform] = !!raw.live

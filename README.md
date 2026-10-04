@@ -81,7 +81,7 @@ Live channels, Kick clips, subscriber-only videos and deleted VODs are not suppo
 
 ### Creators
 
-**Creators** gathers the people you clip. Add a creator with their YouTube, Twitch and Kick channels (and TikTok, Instagram or X links to open in your browser) to see their latest uploads per platform, with what's new since your last visit and whether they're live. **Clip this** opens a video in Create. Turn on notifications to get a desktop alert when they post or go live; SparkClip checks every 15 minutes while it's open. Videos are listed from each platform's public pages and feeds; no account or key is needed.
+**Creators** gathers the people you clip. Add a creator with their YouTube, Twitch and Kick channels (and TikTok, Instagram or X links to open in your browser) to see their latest streams per platform (YouTube shows the channel's Live tab, with a switch to regular videos), with what's new since your last visit and whether they're live. **Clip this** opens a video in Create. Turn on notifications to get a desktop alert when a new stream is up or they go live; SparkClip checks every 15 minutes while it's open. Videos are listed from each platform's public pages and feeds; no account or key is needed.
 
 ### Save disk space (Twitch and Kick VODs)
 
