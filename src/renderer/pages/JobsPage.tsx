@@ -122,6 +122,21 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
     }
   }
 
+  // Earlier runs start again from the options saved in their run folder.
+  const retryEntry = async (entry: HistoryEntry): Promise<void> => {
+    setError(null)
+    try {
+      const result = await getApi().history.retry(entry.jobId)
+      // The dialog closes either way, so an error shows on the page.
+      setInfo(null)
+      if (result.error) setError(result.error)
+      else if (result.jobId) focusJob(result.jobId)
+    } catch (err) {
+      setInfo(null)
+      setError(errorMessage(err, 'Could not start this job again.'))
+    }
+  }
+
   const openEntry = async (entry: HistoryEntry): Promise<void> => {
     setError(null)
     try {
@@ -187,9 +202,11 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
         onOpenJob={(job) => { focusJob(job.id); document.getElementById('page-scroll')?.scrollTo({ top: 0 }) }}
         onCancel={(job) => { void cancel(job) }}
         onOpenEntry={(entry) => {
-          // This session's jobs open their live view; older runs load from disk.
+          // This session's jobs open their live view; older runs load from disk,
+          // and unfinished ones show their details, with Run again when possible.
           if (useJobStore.getState().jobs[entry.jobId]) focusJob(entry.jobId)
-          else void openEntry(entry)
+          else if (entry.status === 'completed') void openEntry(entry)
+          else setInfo(entry)
         }}
         onOpenFolder={(dir) => { void openFolder(dir) }}
         notice={notice}
@@ -198,7 +215,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: AppPage) => void }
         onInfo={setInfo}
       />
       {deleteRun.dialog}
-      {info && <JobInfoDialog entry={info} onClose={closeInfo} />}
+      {info && <JobInfoDialog entry={info} onClose={closeInfo} onRetry={info.canRetry ? () => retryEntry(info) : undefined} />}
     </>
   )
 }
@@ -224,7 +241,6 @@ function JobsList({ active, entries, filter, query, error, refreshing, onFilter,
   onDelete: (entry: HistoryEntry) => void
   onInfo: (entry: HistoryEntry) => void
 }): React.JSX.Element {
-  const sessionJobs = useJobStore((s) => s.jobs)
   const liveIds = useMemo(() => new Set(active.map((job) => job.id)), [active])
   // Queued and running jobs show above; their disk records would duplicate them.
   const previous = useMemo(() => (entries ?? []).filter((entry) => !liveIds.has(entry.jobId) && entry.status !== 'running'), [entries, liveIds])
@@ -353,7 +369,7 @@ function JobsList({ active, entries, filter, query, error, refreshing, onFilter,
               ) : (
                 <ul className="divide-y divide-white/[0.05]">
                   {visible.map((entry) => (
-                    <PreviousJobRow key={entry.jobId} entry={entry} hasDetails={Boolean(sessionJobs[entry.jobId])} onOpen={() => onOpenEntry(entry)} onOpenFolder={() => onOpenFolder(entry.outputDir)} onDelete={() => onDelete(entry)} onInfo={() => onInfo(entry)} />
+                    <PreviousJobRow key={entry.jobId} entry={entry} onOpen={() => onOpenEntry(entry)} onOpenFolder={() => onOpenFolder(entry.outputDir)} onDelete={() => onDelete(entry)} onInfo={() => onInfo(entry)} />
                   ))}
                 </ul>
               )}
@@ -447,11 +463,9 @@ const STATUS_TEXT: Record<HistoryEntry['status'], string> = {
 }
 
 /** One line per run: status, title, then clips, run time, cost and date in aligned columns. */
-function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder, onDelete, onInfo }: { entry: HistoryEntry; hasDetails: boolean; onOpen: () => void; onOpenFolder: () => void; onDelete: () => void; onInfo: () => void }): React.JSX.Element {
+function PreviousJobRow({ entry, onOpen, onOpenFolder, onDelete, onInfo }: { entry: HistoryEntry; onOpen: () => void; onOpenFolder: () => void; onDelete: () => void; onInfo: () => void }): React.JSX.Element {
   const status = STATUS[entry.status]
   const completed = entry.status === 'completed'
-  // Failed and cancelled jobs from this session keep their options, so they can run again.
-  const openable = completed || hasDetails
   const dated = !entry.date.startsWith('1970-')
   const cells = (
     <>
@@ -479,12 +493,8 @@ function PreviousJobRow({ entry, hasDetails, onOpen, onOpenFolder, onDelete, onI
   const cellClass = 'flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-4 pr-2 text-left'
 
   return (
-    <li className={cn('group/row flex items-center pr-2 transition-colors duration-150', openable && 'hover:bg-white/[0.025]')}>
-      {openable ? (
-        <button onClick={onOpen} className={cellClass} title={completed ? 'View clips' : 'Details'}>{cells}</button>
-      ) : (
-        <div className={cellClass}>{cells}</div>
-      )}
+    <li className="group/row flex items-center pr-2 transition-colors duration-150 hover:bg-white/[0.025]">
+      <button onClick={onOpen} className={cellClass} title={completed ? 'View clips' : 'Details'}>{cells}</button>
       <Button
         size="sm"
         variant="ghost"
