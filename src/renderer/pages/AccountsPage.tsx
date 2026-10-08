@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
-import { ArrowUpRight, KeyRound, Loader2, Plus, RefreshCw, RotateCw, Unplug, WifiOff, X } from 'lucide-react'
+import { ArrowUpRight, ChevronRight, Film, KeyRound, Loader2, Plus, RefreshCw, RotateCw, Unplug, WifiOff, X } from 'lucide-react'
 import { useSettingsStore } from '../store/use-settings-store'
 import { useAccountsStore, type AccountsNotice } from '../store/use-accounts-store'
 import { useApiKeyDrafts } from '../hooks/use-api-key-drafts'
 import { getApi } from '../lib/ipc'
-import { cn, errorMessage } from '../lib/utils'
+import { cn } from '../lib/utils'
 import { PROVIDER_LINKS, ZERNIO_LINKS } from '../config/brand'
 import { isValidProfileName, isZernioPlatform, ZERNIO_PLATFORMS, ZERNIO_PROFILE_NAME_MAX, type ZernioAccount } from '../../shared/zernio'
 import { ApiKeyInput } from '../components/ApiKeyInput'
@@ -18,6 +18,9 @@ import { ConfirmDialog, type ConfirmRequest } from '../components/ui/ConfirmDial
 import { TextInput } from '../components/ui/Field'
 import { Select } from '../components/ui/Select'
 import { Skeleton } from '../components/ui/Skeleton'
+import { BackLink } from '../components/ClipList'
+import { AccountVideos } from '../components/AccountVideos'
+import { Segmented } from '../components/ui/Segmented'
 import type { Page } from '../components/Sidebar'
 
 const TITLE = 'Accounts'
@@ -125,15 +128,14 @@ interface PendingConfirm {
 }
 
 function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void }): React.JSX.Element {
-  const [creatingProfile, setCreatingProfile] = useState(false)
-  const [newProfileName, setNewProfileName] = useState('')
-  const [savingProfile, setSavingProfile] = useState(false)
-  const [profileError, setProfileError] = useState<string | null>(null)
   const [pending, setPending] = useState<PendingConfirm | null>(null)
+  /** The platform whose accounts, across every profile, are open. */
+  const [openPlatform, setOpenPlatform] = useState<string | null>(null)
+  /** The account open on its own page, from its platform's page. */
+  const [openAccountId, setOpenAccountId] = useState<string | null>(null)
   const {
     profiles,
     accounts,
-    profileId,
     syncedAt,
     loaded,
     loading,
@@ -144,8 +146,6 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
     hydrate,
     load,
     refreshOnFocus,
-    setProfile,
-    createProfile,
     connect,
     cancelConnect,
     disconnect,
@@ -166,14 +166,12 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
     return () => window.removeEventListener('focus', refreshOnFocus)
   }, [refreshOnFocus])
 
-  const profile = profiles.find((p) => p.id === profileId)
-  const inProfile = accounts.filter((a) => a.profileId === profileId)
-  const byPlatform = new Map(inProfile.map((a) => [a.platform, a]))
-  const platforms = [...ZERNIO_PLATFORMS, ...inProfile.filter((a) => !isZernioPlatform(a.platform)).map((a) => a.platform)]
-  const attention = inProfile.filter((a) => accountHealth(a) !== 'ok').length
+  // Every platform SparkClip connects, then any other one connected in Zernio itself.
+  const platforms = [...ZERNIO_PLATFORMS, ...new Set(accounts.filter((a) => !isZernioPlatform(a.platform)).map((a) => a.platform))]
+  const attention = accounts.filter((a) => accountHealth(a) !== 'ok').length
+  const overLimit = profiles.filter((p) => p.isOverLimit)
   const hasData = syncedAt > 0
-  const busy = Boolean(connecting) || Boolean(disconnecting) || savingProfile
-  const profileNameValid = isValidProfileName(newProfileName)
+  const busy = Boolean(connecting) || Boolean(disconnecting)
 
   // An account disappearing (disconnected elsewhere) ends a pending confirmation.
   const pendingAccount = pending ? accounts.find((a) => a.id === pending.accountId) : undefined
@@ -200,32 +198,58 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
           confirmLabel: 'Continue',
           confirmAriaLabel: `Confirm reconnecting ${name}`,
           tone: 'primary',
-          onConfirm: () => { if (isZernioPlatform(pendingAccount.platform)) void connect(pendingAccount.platform, { reconnect: true }) }
+          onConfirm: () => reconnectNow(pendingAccount)
         }
   }
 
-  const toggleNewProfile = (): void => {
-    setCreatingProfile((open) => !open)
-    setProfileError(null)
+  // Reconnecting always signs in again into the account's own profile.
+  function reconnectNow(account: ZernioAccount): void {
+    if (isZernioPlatform(account.platform)) void connect(account.platform, { reconnect: true, ...(account.profileId ? { profileId: account.profileId } : {}) })
   }
-  const submitProfile = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-    if (!profileNameValid || busy) return
-    setSavingProfile(true)
-    setProfileError(null)
-    try {
-      await createProfile(newProfileName.trim())
-      setCreatingProfile(false)
-      setNewProfileName('')
-    } catch (err) {
-      setProfileError(errorMessage(err, 'Could not create the profile. Try again.'))
-    } finally {
-      setSavingProfile(false)
-    }
+  const askReconnect = (account: ZernioAccount): void => {
+    if (account.platform === 'tiktok') setPending({ kind: 'reconnect', accountId: account.id })
+    else reconnectNow(account)
   }
+  const askDisconnect = (account: ZernioAccount): void => setPending({ kind: 'disconnect', accountId: account.id })
+
   const openNoticeAction = (action: AccountsNotice['action']): void => {
     if (action === 'billing') openLink(ZERNIO_LINKS.billing)
     else if (action === 'settings') onNavigate('settings')
+  }
+
+  const banner = (
+    <>
+      {notice && <NoticeBar notice={notice} onDismiss={dismissNotice} onAction={openNoticeAction} />}
+      {error && <StaleNotice error={error.message} offline={error.kind === 'offline'} syncedAt={syncedAt} loading={loading} onRetry={() => void load()} />}
+    </>
+  )
+  const openAccount = openAccountId ? accounts.find((a) => a.id === openAccountId) : undefined
+
+  if (openAccount && hasData) {
+    return (
+      <AccountView
+        account={openAccount}
+        profileName={profiles.find((p) => p.id === openAccount.profileId)?.name ?? null}
+        banner={banner}
+        onBack={() => setOpenAccountId(null)}
+      />
+    )
+  }
+
+  if (openPlatform && hasData) {
+    return (
+      <>
+        <PlatformAccounts
+          platform={openPlatform}
+          onBack={() => setOpenPlatform(null)}
+          onReconnect={askReconnect}
+          onDisconnect={askDisconnect}
+          onOpenAccount={(account) => setOpenAccountId(account.id)}
+          banner={banner}
+        />
+        {confirmRequest && <ConfirmDialog request={confirmRequest} onClose={closeConfirm} />}
+      </>
+    )
   }
 
   return (
@@ -234,78 +258,19 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
         title={TITLE}
         className="items-center"
         actions={
-          <>
-            {hasData && (
-              <>
-                <div className="flex items-center gap-2">
-                  <span aria-hidden className="text-xs text-ink-subtle">Profile</span>
-                  <Select
-                    aria-label="Zernio profile"
-                    value={profileId ?? ''}
-                    onChange={setProfile}
-                    options={profiles.map((p) => ({ value: p.id, label: p.name }))}
-                    placeholder="No profiles yet"
-                    disabled={busy || profiles.length === 0}
-                    className="w-44"
-                  />
-                </div>
-                <Button
-                  iconOnly
-                  aria-label="New profile"
-                  title="New profile: one account per platform, for another brand or project"
-                  icon={<Plus className="h-4 w-4" />}
-                  onClick={toggleNewProfile}
-                  disabled={busy}
-                  aria-expanded={creatingProfile}
-                  aria-controls="new-zernio-profile-form"
-                />
-              </>
-            )}
-            <Button
-              variant="ghost"
-              iconOnly
-              aria-label="Refresh accounts"
-              title="Refresh"
-              onClick={() => void load()}
-              disabled={loading}
-              icon={<RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />}
-            />
-          </>
+          <Button
+            variant="ghost"
+            iconOnly
+            aria-label="Refresh accounts"
+            title="Refresh"
+            onClick={() => void load()}
+            disabled={loading}
+            icon={<RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />}
+          />
         }
       />
 
       <div className="mt-4 space-y-3">
-        {creatingProfile && (
-          <form id="new-zernio-profile-form" className="animate-fade-in" onSubmit={(event) => void submitProfile(event)}>
-            <div className="glass-tile flex items-center gap-1.5 rounded-2xl p-1.5">
-              <TextInput
-                aria-label="Profile name"
-                value={newProfileName}
-                onChange={(event) => setNewProfileName(event.target.value)}
-                maxLength={ZERNIO_PROFILE_NAME_MAX}
-                required
-                autoFocus
-                disabled={savingProfile}
-                placeholder="New profile name, e.g. My brand"
-                aria-describedby="zernio-new-profile-hint"
-                aria-invalid={Boolean(profileError)}
-                onKeyDown={(event) => { if (event.key === 'Escape') setCreatingProfile(false) }}
-                leading={<Plus className="h-3.5 w-3.5" />}
-                className="min-w-0 flex-1"
-              />
-              <Button variant="ghost" disabled={savingProfile} onClick={() => setCreatingProfile(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" loading={savingProfile} disabled={!profileNameValid || busy}>Create profile</Button>
-            </div>
-            {profileError ? (
-              <p role="alert" className="mt-1.5 px-2 text-xs text-danger" data-selectable>{profileError}</p>
-            ) : (
-              <p id="zernio-new-profile-hint" className="mt-1.5 px-2 text-2xs text-ink-subtle">
-                A profile holds one account per platform. Your Zernio key needs Full access and Read &amp; Write permission to use new ones.
-              </p>
-            )}
-          </form>
-        )}
-
         {notice && <NoticeBar notice={notice} onDismiss={dismissNotice} onAction={openNoticeAction} />}
 
         {error && (!hasData || error.kind === 'auth') ? (
@@ -330,9 +295,9 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
           <StaleNotice error={error.message} offline={error.kind === 'offline'} syncedAt={syncedAt} loading={loading} onRetry={() => void load()} />
         ) : null}
 
-        {profile?.isOverLimit && (
+        {overLimit.length > 0 && (
           <Callout tone="warning" action={<Button size="sm" trailingIcon={<ArrowUpRight className="h-3.5 w-3.5" />} onClick={() => openLink(ZERNIO_LINKS.billing)}>Zernio billing</Button>}>
-            {profile.name} is over your Zernio plan’s profile limit, so its accounts can’t post.
+            {overLimit.map((p) => p.name).join(', ')} {overLimit.length === 1 ? 'is' : 'are'} over your Zernio plan’s profile limit, so {overLimit.length === 1 ? 'its' : 'their'} accounts can’t post.
           </Callout>
         )}
 
@@ -340,58 +305,34 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
 
         {hasData && (
           <Panel padded={false} className="p-1.5">
-            {profile ? (
-              <>
-                <ul aria-label={`Accounts in ${profile.name}`} className={TILE_GRID}>
-                  {platforms.map((platform) => {
-                    const account = byPlatform.get(platform)
-                    const connectable = isZernioPlatform(platform)
-                    return (
-                      <AccountTile
-                        key={`${profileId}:${platform}:${account?.id ?? 'empty'}`}
-                        platform={platform}
-                        account={account}
-                        connecting={connecting?.platform === platform}
-                        busy={busy}
-                        disconnecting={Boolean(account && disconnecting === account.id)}
-                        onConnect={connectable ? () => void connect(platform) : undefined}
-                        onReconnect={connectable && account
-                          ? () => platform === 'tiktok' ? setPending({ kind: 'reconnect', accountId: account.id }) : void connect(platform, { reconnect: true })
-                          : undefined}
-                        onCancel={cancelConnect}
-                        onDisconnect={() => { if (account) setPending({ kind: 'disconnect', accountId: account.id }) }}
-                      />
-                    )
-                  })}
-                </ul>
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 pb-0.5 pt-2 text-2xs text-ink-subtle">
-                  <p>
-                    {inProfile.length === 0 ? (
-                      'Nothing connected yet. Pick a platform; sign-in opens in your browser.'
-                    ) : (
-                      <>
-                        <span className="font-mono tabular text-ink-muted">{inProfile.length}</span> connected
-                        {attention > 0 && <span className="text-warning"> · {attention} need{attention === 1 ? 's' : ''} attention</span>}
-                        {' · '}A second account on a platform goes in another profile.
-                      </>
-                    )}
-                  </p>
-                  <SyncedLabel syncedAt={syncedAt} stale={Boolean(error)} />
-                </div>
-              </>
-            ) : (
-              <div className="flex flex-wrap items-center justify-between gap-3 px-2.5 py-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink">Create your first profile</p>
-                  <p className="text-xs text-ink-muted">A profile groups the accounts for one brand or project.</p>
-                </div>
-                {!creatingProfile && (
-                  <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={toggleNewProfile} disabled={busy}>
-                    Create profile
-                  </Button>
+            <ul aria-label="Platforms" className={TILE_GRID}>
+              {platforms.map((platform) => (
+                <PlatformTile
+                  key={platform}
+                  platform={platform}
+                  accounts={accounts.filter((a) => a.platform === platform)}
+                  connecting={connecting?.platform === platform && !connecting.reconnect}
+                  busy={busy}
+                  onOpen={() => setOpenPlatform(platform)}
+                  onConnect={isZernioPlatform(platform) ? () => void connect(platform) : undefined}
+                  onCancel={cancelConnect}
+                />
+              ))}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 pb-0.5 pt-2 text-2xs text-ink-subtle">
+              <p>
+                {accounts.length === 0 ? (
+                  'Nothing connected yet. Pick a platform; sign-in opens in your browser.'
+                ) : (
+                  <>
+                    <span className="font-mono tabular text-ink-muted">{accounts.length}</span> connected
+                    {attention > 0 && <span className="text-warning"> · {attention} need{attention === 1 ? 's' : ''} attention</span>}
+                    {' · '}Open a platform to see its accounts or add another.
+                  </>
                 )}
-              </div>
-            )}
+              </p>
+              <SyncedLabel syncedAt={syncedAt} stale={Boolean(error)} />
+            </div>
           </Panel>
         )}
 
@@ -581,43 +522,42 @@ function TileText({ name, detail, title, detailId, dim = false }: {
   )
 }
 
-interface AccountTileProps {
+interface PlatformTileProps {
   platform: string
-  account?: ZernioAccount
+  /** This platform's accounts, in every profile. */
+  accounts: ZernioAccount[]
+  /** A new account's sign-in is waiting in the browser. */
   connecting: boolean
   busy: boolean
-  disconnecting: boolean
+  onOpen: () => void
   /** Absent for platforms SparkClip can't connect (accounts added in Zernio itself). */
   onConnect?: () => void
-  /** Asks Zernio for a fresh sign-in on the connected account. */
-  onReconnect?: () => void
   onCancel: () => void
-  onDisconnect: () => void
 }
 
-function AccountTile({
-  platform,
-  account,
-  connecting,
-  busy,
-  disconnecting,
-  onConnect,
-  onReconnect,
-  onCancel,
-  onDisconnect
-}: AccountTileProps): React.JSX.Element {
+/** A platform and how many accounts it has; its accounts are on the platform's page. */
+function PlatformTile({ platform, accounts, connecting, busy, onOpen, onConnect, onCancel }: PlatformTileProps): React.JSX.Element {
   const detailId = useId()
   const name = platformName(platform)
-  const health = account ? accountHealth(account) : 'ok'
-  const attention = health !== 'ok'
-  const state = account ? (health === 'sign-in' ? 'reconnect' : 'connected') : 'disconnected'
+  const attention = accounts.filter((a) => accountHealth(a) !== 'ok').length
 
-  // Not connected: the whole tile is the Connect button.
-  if (!account && !connecting) {
+  if (connecting) {
+    return (
+      <li data-platform={platform} data-state="connecting" className="flex items-center gap-2.5 rounded-xl border border-accent/30 bg-accent/[0.07] p-1.5">
+        <PlatformLens platform={platform} status="connecting" />
+        <TileText name={name} detail={<span className="text-accent-hover">Finish signing in to {name} in your browser…</span>} />
+        <Loader2 className="mx-1 h-3.5 w-3.5 animate-spin text-accent-hover" aria-label="Waiting for your browser" />
+        <Button variant="ghost" size="sm" iconOnly title="Cancel" aria-label={`Cancel connecting ${name}`} onClick={onCancel} icon={<X className="h-3.5 w-3.5" />} />
+      </li>
+    )
+  }
+
+  // Nothing connected yet: the whole tile is the Connect button.
+  if (accounts.length === 0) {
     const note = isZernioPlatform(platform) ? PLATFORM_INFO[platform].note : undefined
     const disabled = busy || !onConnect
     return (
-      <li data-platform={platform} data-state={state}>
+      <li data-platform={platform} data-state="disconnected">
         <button
           type="button"
           onClick={onConnect}
@@ -643,83 +583,286 @@ function AccountTile({
     )
   }
 
-  let detail: ReactNode
-  let title: string | undefined
-  if (connecting) {
-    detail = account
-      ? `Sign in again as ${account.username ? `@${account.username}` : 'the same account'} in your browser…`
-      : `Finish signing in to ${name} in your browser…`
-    title = account ? 'Finish in your browser. Sign in as the same account to keep its history.' : undefined
-  } else if (account && disconnecting) {
-    detail = 'Disconnecting…'
-  } else if (account && attention) {
+  const count = `${accounts.length} account${accounts.length === 1 ? '' : 's'}`
+  return (
+    <li data-platform={platform} data-state={attention > 0 ? 'reconnect' : 'connected'}>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open ${name} accounts`}
+        className={cn(
+          'group/tile flex w-full items-center gap-2.5 rounded-xl p-1.5 pr-2 text-left transition-colors duration-150',
+          attention > 0 ? 'border border-warning/25 bg-warning/[0.05] hover:bg-warning/[0.08]' : 'glass-tile glass-tile-hover'
+        )}
+      >
+        <PlatformLens platform={platform} status={attention > 0 ? 'warning' : 'ok'} />
+        <TileText
+          name={name}
+          detail={<>{count}{attention > 0 && <span className="text-warning"> · {attention} need{attention === 1 ? 's' : ''} attention</span>}</>}
+        />
+        <ChevronRight aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-colors duration-150 group-hover/tile:text-ink" />
+      </button>
+    </li>
+  )
+}
+
+const NEW_PROFILE = '__new__'
+
+/**
+ * One platform's accounts across every profile. A profile holds one account
+ * per platform, so another account is added into a profile that has none yet.
+ */
+function PlatformAccounts({ platform, banner, onBack, onReconnect, onDisconnect, onOpenAccount }: {
+  platform: string
+  onOpenAccount: (account: ZernioAccount) => void
+  /** Notices and sync errors, shown above the list. */
+  banner: ReactNode
+  onBack: () => void
+  onReconnect: (account: ZernioAccount) => void
+  onDisconnect: (account: ZernioAccount) => void
+}): React.JSX.Element {
+  const { profiles, accounts, profileId, syncedAt, loading, error, connecting, disconnecting, load, connect, cancelConnect } = useAccountsStore()
+  const [adding, setAdding] = useState(false)
+  const [target, setTarget] = useState(NEW_PROFILE)
+  const [newName, setNewName] = useState('')
+  const name = platformName(platform)
+  const connectable = isZernioPlatform(platform)
+  const busy = Boolean(connecting) || Boolean(disconnecting)
+  const profileNames = new Map(profiles.map((p) => [p.id, p.name]))
+  const profileOf = (account: ZernioAccount): string => profileNames.get(account.profileId ?? '') ?? 'No profile'
+  const onPlatform = accounts.filter((a) => a.platform === platform).sort((a, b) => profileOf(a).localeCompare(profileOf(b)))
+  const taken = new Set(onPlatform.map((a) => a.profileId))
+  const free = profiles.filter((p) => !taken.has(p.id))
+  const pendingNew = connecting?.platform === platform && !connecting.reconnect
+  const targetValid = target === NEW_PROFILE ? isValidProfileName(newName) : free.some((p) => p.id === target)
+
+  const openAdd = (): void => {
+    // The selected profile first, e.g. the one an automation sent you here for.
+    setTarget((free.find((p) => p.id === profileId) ?? free[0])?.id ?? NEW_PROFILE)
+    setNewName('')
+    setAdding(true)
+  }
+  const submit = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    if (!connectable || !targetValid || busy) return
+    setAdding(false)
+    void connect(platform, target === NEW_PROFILE ? { newProfileName: newName.trim() } : { profileId: target })
+  }
+
+  return (
+    <>
+      <PageHeader
+        leading={<BackLink label="Accounts" onClick={onBack} />}
+        title={
+          <span className="flex items-center gap-3">
+            <PlatformIcon platform={platform} className="h-8 w-8 rounded-lg" />
+            <span className="truncate">{name}</span>
+          </span>
+        }
+        description={`Your ${name} accounts across every Zernio profile.`}
+        actions={
+          <>
+            {connectable && (
+              <Button variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={openAdd} disabled={busy} aria-expanded={adding} aria-controls="add-platform-account-form">
+                Add account
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              iconOnly
+              aria-label="Refresh accounts"
+              title="Refresh"
+              onClick={() => void load()}
+              disabled={loading}
+              icon={<RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />}
+            />
+          </>
+        }
+      />
+
+      <div className="mt-4 space-y-3">
+        {banner}
+
+        {adding && (
+          <form id="add-platform-account-form" className="animate-fade-in" onSubmit={submit}>
+            <div className="glass-tile flex flex-wrap items-center gap-1.5 rounded-2xl p-1.5">
+              <Select
+                aria-label={`Profile for the new ${name} account`}
+                value={target}
+                onChange={setTarget}
+                options={[...free.map((p) => ({ value: p.id, label: p.name })), { value: NEW_PROFILE, label: 'New profile…' }]}
+                className="w-48"
+              />
+              {target === NEW_PROFILE && (
+                <TextInput
+                  aria-label="New profile name"
+                  value={newName}
+                  onChange={(event) => setNewName(event.target.value)}
+                  maxLength={ZERNIO_PROFILE_NAME_MAX}
+                  autoFocus
+                  placeholder="Profile name, e.g. Second channel"
+                  onKeyDown={(event) => { if (event.key === 'Escape') setAdding(false) }}
+                  className="min-w-0 flex-1"
+                />
+              )}
+              <Button variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={!targetValid || busy}>Connect</Button>
+            </div>
+            <p className="mt-1.5 px-2 text-2xs text-ink-subtle">
+              A profile holds one {name} account, so a new one goes in a profile without one. If your browser signs straight in to an account you already connected, sign out of {name} there first.
+            </p>
+          </form>
+        )}
+
+        <Panel padded={false} className="p-1.5">
+          {onPlatform.length === 0 && !pendingNew ? (
+            <p className="px-2.5 py-2 text-sm text-ink-muted">No {name} accounts yet.{connectable && ' Add one; sign-in opens in your browser.'}</p>
+          ) : (
+            <ul aria-label={`${name} accounts`} className="space-y-1.5">
+              {onPlatform.map((account) => (
+                <PlatformAccountRow
+                  key={account.id}
+                  account={account}
+                  profileName={profileOf(account)}
+                  connecting={Boolean(connecting?.reconnect && connecting.platform === platform && connecting.profileId === account.profileId)}
+                  disconnecting={disconnecting === account.id}
+                  busy={busy}
+                  onReconnect={connectable ? () => onReconnect(account) : undefined}
+                  onCancel={cancelConnect}
+                  onDisconnect={() => onDisconnect(account)}
+                  onOpen={() => onOpenAccount(account)}
+                />
+              ))}
+              {pendingNew && (
+                <li className="flex items-center gap-2.5 rounded-xl border border-accent/30 bg-accent/[0.07] p-1.5" data-state="connecting">
+                  <PlatformLens platform={platform} status="connecting" />
+                  <TileText name={`New ${name} account`} detail={<span className="text-accent-hover">Finish signing in to {name} in your browser…</span>} />
+                  <Loader2 className="mx-1 h-3.5 w-3.5 animate-spin text-accent-hover" aria-label="Waiting for your browser" />
+                  <Button variant="ghost" size="sm" iconOnly title="Cancel" aria-label={`Cancel connecting ${name}`} onClick={cancelConnect} icon={<X className="h-3.5 w-3.5" />} />
+                </li>
+              )}
+            </ul>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 pb-0.5 pt-2 text-2xs text-ink-subtle">
+            <p>
+              <span className="font-mono tabular text-ink-muted">{onPlatform.length}</span> connected
+            </p>
+            <SyncedLabel syncedAt={syncedAt} stale={Boolean(error)} />
+          </div>
+        </Panel>
+      </div>
+    </>
+  )
+}
+
+/** One account on the platform page: its handle, its profile and its status. */
+function PlatformAccountRow({ account, profileName, connecting, disconnecting, busy, onReconnect, onCancel, onDisconnect, onOpen }: {
+  account: ZernioAccount
+  onOpen: () => void
+  profileName: string
+  connecting: boolean
+  disconnecting: boolean
+  busy: boolean
+  onReconnect?: () => void
+  onCancel: () => void
+  onDisconnect: () => void
+}): React.JSX.Element {
+  const attention = accountHealth(account) !== 'ok'
+  const label = accountLabel(account)
+  let detail: ReactNode = profileName
+  if (connecting) detail = <span className="text-accent-hover">Sign in again as {account.username ? `@${account.username}` : 'the same account'} in your browser…</span>
+  else if (disconnecting) detail = 'Disconnecting…'
+  else if (attention) {
     const status = account.needsReconnect ? 'Reconnect needed' : !account.isActive ? 'Inactive' : 'Needs attention'
-    detail = (
-      <>
-        <span className="text-warning">{status}</span> · {account.issue ?? accountLabel(account)}
-      </>
-    )
-    title = [accountLabel(account), account.issue].filter(Boolean).join(' · ')
-  } else if (account) {
-    const issue = account.health === 'warning' ? account.issue : null
-    detail = (
-      <>
-        {accountLabel(account)}
-        {issue && <span className="text-ink-subtle"> · {issue}</span>}
-      </>
-    )
-    title = [accountLabel(account), issue].filter(Boolean).join(' · ')
+    detail = <>{profileName} · <span className="text-warning">{status}</span>{account.issue && ` · ${account.issue}`}</>
+  } else if (account.health === 'warning' && account.issue) {
+    detail = <>{profileName}<span className="text-ink-subtle"> · {account.issue}</span></>
   }
 
   return (
     <li
-      data-platform={platform}
-      data-state={state}
+      data-account={account.id}
+      data-state={attention ? 'reconnect' : 'connected'}
       className={cn(
-        'group/tile flex items-center gap-2.5 rounded-xl p-1.5 transition-colors duration-150',
-        connecting
-          ? 'border border-accent/30 bg-accent/[0.07]'
-          : attention
-            ? 'border border-warning/25 bg-warning/[0.05]'
-            : 'glass-tile glass-tile-hover'
+        'flex items-center gap-2.5 rounded-xl p-1.5',
+        connecting ? 'border border-accent/30 bg-accent/[0.07]' : attention ? 'border border-warning/25 bg-warning/[0.05]' : 'glass-tile glass-tile-hover'
       )}
     >
-      <PlatformLens platform={platform} status={connecting ? 'connecting' : attention ? 'warning' : 'ok'} />
-      <TileText name={name} detail={connecting ? <span className="text-accent-hover">{detail}</span> : detail} title={title} />
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open ${label}`}
+        className="group/tile flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+      >
+        <PlatformLens platform={account.platform} status={connecting ? 'connecting' : attention ? 'warning' : 'ok'} />
+        <TileText name={label} detail={detail} title={[label, profileName, account.issue].filter(Boolean).join(' · ')} />
+        <ChevronRight aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-colors duration-150 group-hover/tile:text-ink" />
+      </button>
       <div className="flex shrink-0 items-center gap-0.5">
         {connecting ? (
           <>
             <Loader2 className="mx-1 h-3.5 w-3.5 animate-spin text-accent-hover" aria-label="Waiting for your browser" />
-            <Button variant="ghost" size="sm" iconOnly title="Cancel" aria-label={`Cancel connecting ${name}`} onClick={onCancel} icon={<X className="h-3.5 w-3.5" />} />
+            <Button variant="ghost" size="sm" iconOnly title="Cancel" aria-label={`Cancel reconnecting ${label}`} onClick={onCancel} icon={<X className="h-3.5 w-3.5" />} />
           </>
         ) : (
           <>
-            {attention && onReconnect && (
-              <Button size="sm" onClick={onReconnect} disabled={busy} aria-label={`Reconnect ${name}`}>
-                Reconnect
-              </Button>
-            )}
-            {/* Quiet until the tile is hovered or focused, so a full grid doesn't repeat the same buttons. */}
-            <div className={cn('flex items-center gap-0.5 transition-opacity duration-150', disconnecting ? 'opacity-100' : 'opacity-0 focus-within:opacity-100 group-hover/tile:opacity-100')}>
-              {!attention && onReconnect && (
-                <Button variant="ghost" size="sm" iconOnly title="Reconnect" aria-label={`Reconnect ${name}`} onClick={onReconnect} disabled={busy} icon={<RotateCw className="h-3.5 w-3.5" />} />
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                iconOnly
-                title="Disconnect"
-                aria-label={`Disconnect ${name}`}
-                onClick={onDisconnect}
-                disabled={busy}
-                loading={disconnecting}
-                icon={<Unplug className="h-3.5 w-3.5" />}
-                className="hover:bg-danger/10 hover:text-danger"
-              />
-            </div>
+            {onReconnect && (attention ? (
+              <Button size="sm" onClick={onReconnect} disabled={busy} aria-label={`Reconnect ${label}`}>Reconnect</Button>
+            ) : (
+              <Button variant="ghost" size="sm" iconOnly title="Reconnect" aria-label={`Reconnect ${label}`} onClick={onReconnect} disabled={busy} icon={<RotateCw className="h-3.5 w-3.5" />} />
+            ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              title="Disconnect"
+              aria-label={`Disconnect ${label}`}
+              onClick={onDisconnect}
+              disabled={busy}
+              loading={disconnecting}
+              icon={<Unplug className="h-3.5 w-3.5" />}
+              className="hover:bg-danger/10 hover:text-danger"
+            />
           </>
         )}
       </div>
     </li>
+  )
+}
+
+type AccountTab = 'videos'
+
+/** One account: its posts, with room for more tabs. */
+function AccountView({ account, profileName, banner, onBack }: {
+  account: ZernioAccount
+  profileName: string | null
+  banner: ReactNode
+  onBack: () => void
+}): React.JSX.Element {
+  const [tab, setTab] = useState<AccountTab>('videos')
+  const name = platformName(account.platform)
+  return (
+    <>
+      <PageHeader
+        leading={<BackLink label={name} onClick={onBack} />}
+        title={
+          <span className="flex items-center gap-3">
+            <PlatformLens platform={account.platform} status={accountHealth(account) === 'ok' ? 'ok' : 'warning'} />
+            <span className="truncate">{accountLabel(account)}</span>
+          </span>
+        }
+        description={[name, profileName && `${profileName} profile`].filter(Boolean).join(' · ')}
+      />
+      <div className="mt-4 space-y-3">
+        {banner}
+        <Segmented<AccountTab>
+          label="Account sections"
+          value={tab}
+          onChange={setTab}
+          options={[{ value: 'videos', label: <span className="inline-flex items-center gap-1.5"><Film className="h-3.5 w-3.5" />Videos</span> }]}
+        />
+        {tab === 'videos' && <AccountVideos account={account} />}
+      </div>
+    </>
   )
 }

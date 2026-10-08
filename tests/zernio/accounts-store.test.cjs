@@ -437,3 +437,27 @@ test('ensureAccountsLoaded only asks Zernio when the data is old', async () => {
   await old.ensureAccountsLoaded()
   assert.equal(old.calls.sync, 1)
 })
+
+test('connect: a second account on a platform goes into the chosen profile without changing the selected one', async () => {
+  const s = load()
+  s.queueSync({ overview: overview([account('1', 'tiktok')]), stale: false, error: null })
+  await s.state().load()
+  assert.equal(s.state().profileId, P1)
+
+  await s.state().connect('tiktok', { profileId: P2 })
+  assert.deepEqual(plain(s.calls.connect.at(-1)), { platform: 'tiktok', profileId: P2, options: { reconnect: false } })
+  assert.equal(s.state().connecting.profileId, P2)
+  assert.equal(s.state().profileId, P1)
+  s.state().cancelConnect()
+
+  // Reconnecting an account in another profile signs in there.
+  await s.state().connect('tiktok', { reconnect: true, profileId: P2 })
+  assert.equal(s.calls.connect.at(-1).profileId, P2)
+  s.state().cancelConnect()
+
+  // A profile that's gone is refused before anything opens.
+  const before = s.calls.connect.length
+  await s.state().connect('tiktok', { profileId: 'c'.repeat(24) })
+  assert.equal(s.calls.connect.length, before)
+  assert.equal(s.state().notice.tone, 'danger')
+})

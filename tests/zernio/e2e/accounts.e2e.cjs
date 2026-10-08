@@ -49,7 +49,10 @@ test('accounts: set up, connect, reconnect, disconnect, recover and work offline
     await combobox.click()
     await page.getByRole('listbox').getByRole('option', { name, exact: true }).click()
   }
-  const profileSelect = () => page.getByLabel('Zernio profile', { exact: true })
+  // A platform's page: open it from its tile, leave by the back link (the sidebar has an Accounts button too).
+  const openPlatform = (name) => click(`Open ${name} accounts`)
+  const back = () => page.getByRole('button', { name: 'Accounts', exact: true }).last().click()
+  const accountRows = (name) => page.getByRole('list', { name: `${name} accounts`, exact: true }).locator('li[data-account]')
 
   await t.test('pasting a rejected key shows the auth error', async () => {
     await openAccounts()
@@ -71,7 +74,9 @@ test('accounts: set up, connect, reconnect, disconnect, recover and work offline
     await page.getByText('Saved', { exact: true }).waitFor({ timeout: TIMEOUT })
     await openAccounts()
     await expectRowState('linkedin', 'connected')
-    await row('linkedin').getByText('Jane Doe · @jane').waitFor()
+    await row('linkedin').getByText('1 account', { exact: true }).waitFor()
+    // The grid names no account; the platform's page does.
+    assert.equal(await row('linkedin').getByText('@jane', { exact: false }).count(), 0)
     await expectRowState('pinterest', 'connected')
     assert.equal(await row('tiktok').getAttribute('data-state'), 'disconnected')
     await page.getByTestId('accounts-synced').filter({ hasText: 'Synced just now' }).waitFor()
@@ -115,20 +120,25 @@ test('accounts: set up, connect, reconnect, disconnect, recover and work offline
     mock.setHealth(tiktok._id, { status: 'error', needsReconnect: true, issues: ['Token expired'] })
     await click('Refresh accounts')
     await expectRowState('tiktok', 'reconnect')
-    await row('tiktok').getByText('Reconnect needed').waitFor()
+    await row('tiktok').getByText('1 needs attention', { exact: false }).waitFor()
+    await openPlatform('TikTok')
+    await accountRows('TikTok').first().getByText('Reconnect needed', { exact: false }).waitFor()
     await shot('06-needs-reconnect')
     const sessionsBefore = mock.state.sessions.length
-    await click('Reconnect TikTok')
+    await click('Reconnect tiktok creator · @tiktok_creator')
     await page.getByRole('alertdialog').getByText('permanently deletes its Zernio analytics, inbox and DM history', { exact: false }).waitFor()
     assert.equal(mock.state.sessions.length, sessionsBefore, 'the browser is not opened before the warning is confirmed')
     await click('Confirm reconnecting TikTok')
     await expectNotice('TikTok connected')
-    await expectRowState('tiktok', 'connected')
+    await page.locator('li[data-account][data-state="connected"]').waitFor({ timeout: TIMEOUT })
     assert.equal(mock.state.sessions.at(-1).force, true)
+    await back()
+    await expectRowState('tiktok', 'connected')
   })
 
   await t.test('disconnect asks first, then removes the account', async () => {
-    await click('Disconnect LinkedIn')
+    await openPlatform('LinkedIn')
+    await click('Disconnect Jane Doe · @jane')
     await page.getByRole('alertdialog').getByText('This also removes Jane Doe · @jane from your Zernio workspace', { exact: false }).waitFor()
     const cancel = page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true })
     const confirm = page.getByRole('button', { name: 'Confirm disconnecting LinkedIn', exact: true })
@@ -139,6 +149,8 @@ test('accounts: set up, connect, reconnect, disconnect, recover and work offline
     assert.equal(await cancel.evaluate((element) => element === document.activeElement), true)
     await click('Confirm disconnecting LinkedIn')
     await expectNotice('LinkedIn disconnected.')
+    await page.getByText('No LinkedIn accounts yet.', { exact: false }).waitFor({ timeout: TIMEOUT })
+    await back()
     await expectRowState('linkedin', 'disconnected')
     assert.equal(mock.state.accounts.some((a) => a.platform === 'linkedin'), false)
   })
@@ -173,37 +185,74 @@ test('accounts: set up, connect, reconnect, disconnect, recover and work offline
     await expectRowState('threads', 'connected')
   })
 
-  await t.test('profiles can be switched', async () => {
-    await choose(profileSelect(), 'Brand')
-    await expectRowState('tiktok', 'disconnected')
-    assert.equal(await page.locator('li[data-state="connected"]').count(), 0)
-    await choose(profileSelect(), profile.name)
-    await expectRowState('tiktok', 'connected')
+  await t.test('a platform page lists the accounts in every profile and adds another into a new or a chosen profile', async () => {
+    const brand = mock.state.profiles.find((p) => p.name === 'Brand')
+    mock.addAccount('youtube', brand._id, { username: 'brandchannel' })
+    await click('Refresh accounts')
+    await row('youtube').getByText('2 accounts', { exact: true }).waitFor({ timeout: TIMEOUT })
+    await openPlatform('YouTube')
+    await accountRows('YouTube').nth(1).waitFor({ timeout: TIMEOUT })
+    await accountRows('YouTube').getByText('Brand', { exact: true }).waitFor()
+
+    // Both profiles have YouTube, so the new account needs a new profile.
+    const browserCount = mock.state.opened.length
+    await click('Add account')
+    await page.getByLabel('New profile name', { exact: true }).fill('Launch team')
+    mock.failNext('POST', '/api/v1/profiles', 409, { error: 'Name already taken' })
+    await click('Connect')
+    await expectNotice('already exists')
+    assert.equal(mock.state.opened.length, browserCount, 'no sign-in opens when the profile could not be created')
+    assert.equal(await accountRows('YouTube').count(), 2)
+
+    await click('Add account')
+    await page.getByLabel('New profile name', { exact: true }).fill('Launch team')
+    await click('Connect')
+    await expectNotice('YouTube connected')
+    await accountRows('YouTube').nth(2).waitFor({ timeout: TIMEOUT })
+    const launch = mock.state.profiles.find((p) => p.name === 'Launch team')
+    assert.ok(mock.state.accounts.some((a) => a.platform === 'youtube' && a.profileId._id === launch._id))
+    await shot('11-platform-accounts')
+    await back()
+    await row('youtube').getByText('3 accounts', { exact: true }).waitFor()
+
+    // Profiles without the platform are offered; an earlier step left Threads' browser without a redirect.
+    mock.setBrowser('threads', undefined)
+    await openPlatform('Threads')
+    await click('Add account')
+    await choose(page.getByLabel('Profile for the new Threads account', { exact: true }), 'Brand')
+    await click('Connect')
+    await expectNotice('Threads connected')
+    await accountRows('Threads').nth(1).waitFor({ timeout: TIMEOUT })
+    assert.ok(mock.state.accounts.some((a) => a.platform === 'threads' && a.profileId._id === brand._id))
+    await back()
+    await shot('12-platforms')
   })
 
-  await t.test('create a profile first, then connect an account only inside it', async () => {
-    const browserCount = mock.state.opened.length
-    await click('New profile')
-    await page.getByLabel('Profile name', { exact: true }).fill('Launch team')
-    mock.failNext('POST', '/api/v1/profiles', 409, { error: 'Name already taken' })
-    await click('Create profile')
-    await page.getByRole('alert').filter({ hasText: 'already exists' }).waitFor()
-    assert.equal(await page.getByLabel('Profile name', { exact: true }).inputValue(), 'Launch team')
-    assert.equal(await profileSelect().textContent(), profile.name)
-    await shot('11-profile-form-error')
+  await t.test('an account page lists the videos on that account, refreshes and loads more', async () => {
+    const channel = mock.state.accounts.find((a) => a.platform === 'youtube' && a.username === 'mychannel')
+    for (let i = 0; i < 25; i += 1) {
+      mock.addExternalPost(channel._id, { platform: 'youtube', platformPostUrl: `https://www.youtube.com/watch?v=vid${i}`, content: `Clip number ${i}` })
+    }
+    const cards = () => page.getByRole('list', { name: 'Videos', exact: true }).locator('li[data-video]')
+    await openPlatform('YouTube')
+    await click('Open youtube creator · @mychannel')
+    await page.getByRole('radio', { name: 'Videos' }).waitFor({ timeout: TIMEOUT })
+    await cards().nth(23).waitFor({ timeout: TIMEOUT })
+    assert.equal(await cards().count(), 24)
+    await cards().first().getByText('Clip number 0', { exact: true }).waitFor()
+    await cards().first().getByText('1.2K views', { exact: false }).waitFor()
+    await shot('13-account-videos')
 
-    await click('Create profile')
-    await page.getByRole('list', { name: 'Accounts in Launch team', exact: true }).waitFor()
-    assert.equal(mock.state.opened.length, browserCount, 'creating a profile does not also open platform sign-in')
-    assert.equal(await page.locator('li[data-state="connected"]').count(), 0)
-    await shot('12-empty-profile')
-    await click('Connect LinkedIn')
-    await expectRowState('linkedin', 'connected')
-    const created = mock.state.profiles.find((p) => p.name === 'Launch team')
-    assert.ok(mock.state.accounts.some((a) => a.platform === 'linkedin' && a.profileId._id === created._id))
-    await choose(profileSelect(), profile.name)
-    await expectRowState('linkedin', 'disconnected')
-    await expectRowState('tiktok', 'connected')
+    await click('Load more')
+    await cards().nth(24).waitFor({ timeout: TIMEOUT })
+    assert.equal(await page.getByRole('button', { name: 'Load more', exact: true }).count(), 0)
+
+    await click('Refresh')
+    await mock.waitFor(() => mock.state.externalSyncs.includes(channel._id))
+    await cards().nth(23).waitFor({ timeout: TIMEOUT })
+
+    await page.getByRole('button', { name: 'YouTube', exact: true }).click()
+    await back()
   })
 
   await t.test('a 429 keeps the accounts on screen and says when to retry', async () => {

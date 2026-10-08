@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  ZernioAccountVideosPage,
   ZernioConnectOptions,
   ZernioConnectResult,
   ZernioConnectStart,
@@ -97,6 +98,12 @@ export interface BridgeClipAPI {
     connect: (platform: ZernioPlatform, profileId: string | null, options?: ZernioConnectOptions) => Promise<ZernioConnectStart>
     cancelConnect: () => Promise<void>
     disconnect: (accountId: string) => Promise<void>
+    videos: {
+      /** A page of an account's posts, newest first; `refresh` asks Zernio to read the platform now. */
+      list: (accountId: string, page: number, refresh: boolean, platform: string) => Promise<ZernioAccountVideosPage>
+      /** Opens a post on its platform's site. */
+      open: (url: string, platform: string) => Promise<void>
+    }
     onConnectResult: (callback: (result: ZernioConnectResult) => void) => () => void
     /** The Zernio key was added, replaced or removed; drop anything from the previous workspace. */
     onReset: (callback: (state: { configured: boolean }) => void) => () => void
@@ -248,6 +255,10 @@ const api: BridgeClipAPI = {
     connect: (platform, profileId, options) => ipcRenderer.invoke('zernio:connect', platform, profileId, options),
     cancelConnect: () => ipcRenderer.invoke('zernio:cancelConnect'),
     disconnect: (accountId) => ipcRenderer.invoke('zernio:disconnect', accountId),
+    videos: {
+      list: (accountId, page, refresh, platform) => ipcRenderer.invoke('zernio:videos:list', accountId, page, refresh, platform),
+      open: (url, platform) => ipcRenderer.invoke('zernio:videos:open', url, platform)
+    },
     onConnectResult: (callback) => subscribe('zernio:connectResult', callback),
     onReset: (callback) => subscribe('zernio:reset', callback),
     posts: {
