@@ -64,7 +64,8 @@ interface AccountsState {
   refreshOnFocus: () => void
   setProfile: (profileId: string) => void
   createProfile: (name: string) => Promise<ZernioProfile>
-  connect: (platform: ZernioPlatform, options?: { reconnect?: boolean; newProfileName?: string }) => Promise<void>
+  /** Connects into `profileId` when given, a new profile with `newProfileName`, or the selected profile. */
+  connect: (platform: ZernioPlatform, options?: { reconnect?: boolean; newProfileName?: string; profileId?: string }) => Promise<void>
   cancelConnect: () => void
   disconnect: (accountId: string) => Promise<void>
   dismissNotice: () => void
@@ -288,7 +289,7 @@ export const useAccountsStore = create<AccountsState>((set, get) => {
       return profile
     },
 
-    connect: async (platform, { reconnect = false, newProfileName } = {}) => {
+    connect: async (platform, { reconnect = false, newProfileName, profileId } = {}) => {
       if (get().connecting) return
       ensureSubscribed()
       const name = platformName(platform)
@@ -297,7 +298,11 @@ export const useAccountsStore = create<AccountsState>((set, get) => {
         set({ notice: { tone: 'danger', text: 'Enter a profile name of 1–80 characters before connecting.' } })
         return
       }
-      const targetProfileId = profileName ? null : get().profileId
+      if (profileId !== undefined && (newProfileName !== undefined || !get().profiles.some((p) => p.id === profileId))) {
+        set({ notice: { tone: 'danger', text: 'That Zernio profile is no longer available. Refresh and try again.' } })
+        return
+      }
+      const targetProfileId = profileName ? null : profileId ?? get().profileId
       const onPlatform = get().accounts.filter((a) => a.platform === platform)
       const connecting: Connecting = {
         platform,
@@ -318,7 +323,8 @@ export const useAccountsStore = create<AccountsState>((set, get) => {
           const createdProfile = start.createdProfile
           set((state) => ({ profiles: [...state.profiles.filter((p) => p.id !== createdProfile.id), createdProfile] }))
         }
-        if ((start.status !== 'failed' || start.createdProfile) && start.profileId && start.profileId !== get().profileId) {
+        // A sign-in into a chosen profile leaves the selected one alone.
+        if (profileId === undefined && (start.status !== 'failed' || start.createdProfile) && start.profileId && start.profileId !== get().profileId) {
           // The workspace had no profile, or a new one was created for this sign-in.
           saveProfile(start.profileId)
           set({ profileId: start.profileId })
