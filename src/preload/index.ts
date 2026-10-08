@@ -41,6 +41,8 @@ export interface HistoryEntry {
   errorMessage: string | null
   /** The followed creator the run's clips belong to, if one was chosen. */
   creatorId: string | null
+  /** An unfinished run whose options were saved, so it can run again. */
+  canRetry: boolean
 }
 
 export interface ToolStatus {
@@ -135,6 +137,8 @@ export interface BridgeClipAPI {
     delete: (jobId: string) => Promise<{ freedBytes: number }>
     /** Assign a run's clips to a followed creator, or to none with null. */
     setCreator: (jobId: string, creatorId: string | null) => Promise<boolean>
+    /** Start an unfinished run again with the options it was saved with. */
+    retry: (jobId: string) => Promise<{ jobId?: string; queued?: boolean; error?: string }>
   }
   creators: {
     list: () => Promise<Creator[]>
@@ -273,7 +277,8 @@ const api: BridgeClipAPI = {
     list: () => ipcRenderer.invoke('history:list'),
     getJob: (outputDir) => ipcRenderer.invoke('history:getJob', outputDir),
     delete: (jobId) => ipcRenderer.invoke('history:delete', jobId),
-    setCreator: (jobId, creatorId) => ipcRenderer.invoke('history:setCreator', jobId, creatorId)
+    setCreator: (jobId, creatorId) => ipcRenderer.invoke('history:setCreator', jobId, creatorId),
+    retry: (jobId) => ipcRenderer.invoke('history:retry', jobId)
   },
   creators: {
     list: () => ipcRenderer.invoke('creators:list'),

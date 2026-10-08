@@ -52,6 +52,11 @@ export function isStreamVod(value: string): boolean {
   return Boolean(twitchVodId(value) || kickVod(value))
 }
 
+/** Links whose clips can come from a small planning copy plus full-quality windows: Twitch and Kick VODs, YouTube videos. */
+export function supportsSaveSpace(value: string): boolean {
+  return isStreamVod(value) || youtubeId(value.trim()) != null
+}
+
 /** Why a link on a supported VOD platform can't be clipped, or null. */
 export function vodSourceError(value: string): string | null {
   return twitchSourceError(value) ?? kickSourceError(value)

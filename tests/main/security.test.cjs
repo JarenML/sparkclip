@@ -511,6 +511,37 @@ test('run history persists outcomes, identifies interrupted work, and omits sour
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
 
+test('unfinished runs keep their options so they can run again', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridgeclip-retry-'))
+  const failedId = '5de005c2-1234-4123-8123-567890abcdef'
+  const oldId = '5de005c3-1234-4123-8123-567890abcdef'
+  const manager = loadSource('file-manager.ts', { '../shared/job-output': jobOutput, './run-history': runHistory, './tools': { resolveBinary: () => 'ffprobe' } })
+  const request = { videoUrl: 'https://kick.com/video/abc', maxClips: null, autoClipCount: true, startTimeSeconds: 840, endTimeSeconds: null, plannerCapabilities: { id: 'model' } }
+  try {
+    runHistory.createRunRecord(root, failedId, request.videoUrl)
+    runHistory.saveRunRequest(root, failedId, request)
+    runHistory.finishRunRecord(root, failedId, 'failed', 'The clipping pipeline failed.')
+    // Runs from before options were saved can't run again.
+    runHistory.createRunRecord(root, oldId, request.videoUrl)
+    runHistory.finishRunRecord(root, oldId, 'failed')
+
+    const saved = runHistory.readRunRequest(root, failedId)
+    assert.equal(saved.videoUrl, request.videoUrl)
+    assert.equal(saved.startTimeSeconds, 840)
+    assert.equal(saved.endTimeSeconds, null)
+    assert.equal('plannerCapabilities' in saved, false)
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(path.join(root, failedId, 'run-request.json')).mode & 0o077, 0)
+    }
+    assert.equal(runHistory.readRunRequest(root, oldId), null)
+    assert.throws(() => runHistory.saveRunRequest(root, '../outside', request))
+
+    const history = await manager.getJobHistory(root)
+    assert.equal(history.find((entry) => entry.jobId === failedId).canRetry, true)
+    assert.equal(history.find((entry) => entry.jobId === oldId).canRetry, false)
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
 test('diagnostic logs omit source URLs and use private file permissions', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridgeclip-logs-'))
   const loggerModule = loadSource('logger.ts', {

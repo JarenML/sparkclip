@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { Copy, FolderOpen, Info } from 'lucide-react'
+import { Copy, FolderOpen, Info, RotateCcw } from 'lucide-react'
 import type { HistoryEntry } from '../../preload/index'
 import { DURATION_OPTIONS, TITLE_LANGUAGES } from '../../shared/job-contract'
 import { parseJobOutput, type JobOutput } from '../../shared/job-output'
@@ -121,10 +121,11 @@ export function jobInfoSections(entry: HistoryEntry, output: JobOutput | null): 
   return sections
 }
 
-/** A run's source link, range, settings, models and cost. */
-export function JobInfoDialog({ entry, onClose }: { entry: HistoryEntry; onClose: () => void }): React.JSX.Element {
+/** A run's source link, range, settings, models and cost; unfinished runs can run again. */
+export function JobInfoDialog({ entry, onClose, onRetry }: { entry: HistoryEntry; onClose: () => void; onRetry?: () => Promise<void> }): React.JSX.Element {
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
+  const [retrying, setRetrying] = useState(false)
   const [output, setOutput] = useState<JobOutput | null | undefined>(entry.status === 'completed' ? undefined : null)
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -182,7 +183,13 @@ export function JobInfoDialog({ entry, onClose }: { entry: HistoryEntry; onClose
       </div>
       <DialogFooter>
         <Button icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={() => { void getApi().shell.openPath(entry.outputDir) }}>Open folder</Button>
-        <Button ref={closeRef} variant="primary" onClick={onClose}>Close</Button>
+        <Button ref={closeRef} variant={onRetry ? 'secondary' : 'primary'} onClick={onClose}>Close</Button>
+        {onRetry && (
+          <Button variant="primary" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={retrying}
+            onClick={() => { setRetrying(true); void onRetry().finally(() => setRetrying(false)) }}>
+            Run again
+          </Button>
+        )}
       </DialogFooter>
     </Dialog>
   )

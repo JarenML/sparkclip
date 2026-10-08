@@ -13,7 +13,7 @@ import {
   preflightCheck,
   type ClipJobConfig
 } from './pipeline-runner'
-import { createRunRecord, finishRunRecord, setRunCreator } from './run-history'
+import { createRunRecord, finishRunRecord, readRunRequest, saveRunRequest, setRunCreator } from './run-history'
 import { cancelTrackedJob, dismissJob, enqueueJob, initJobManager, listJobs, liveJobIds } from './job-manager'
 import { logger, getLogFilePath } from './logger'
 import { assertAbsolutePath, assertMediaPath, assertTrustedSender, authorizeMedia, isTrustedExternalUrl, isWebUrl, isWithinDirectory, openAuthorizedMedia } from './security'
@@ -146,7 +146,9 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     return result.filePaths[0]
   })
 
-  handle('job:start', async (_event, config: ClipJobConfig) => {
+  // Checks a run's options and queues it: new runs from the renderer and runs
+  // started again from their saved options take the same path.
+  const startJob = async (config: ClipJobConfig): Promise<{ jobId?: string; queued?: boolean; error?: string }> => {
     const window = getMainWindow()
     if (!window) {
       logger.warn('job.start.noWindow')
@@ -210,9 +212,22 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       try { finishRunRecord(settings.outputDirectory, jobId, 'failed', 'Could not start this run.') } catch { /* Output folder may be unavailable. */ }
       return { error: 'Could not create the clipping run. Check the output folder and retry.' }
     }
+    // Without saved options the run still works; it just can't run again later.
+    try { saveRunRequest(settings.outputDirectory, jobId, config) } catch { logger.warn('job.request.saveFailed', { jobId }) }
     // Starts now when a slot is free; otherwise waits its turn in the queue.
     const job = enqueueJob(jobId, config, settings.outputDirectory)
     return { jobId, queued: job.status === 'queued' }
+  }
+
+  handle('job:start', (_event, config: ClipJobConfig) => startJob(config))
+
+  handle('history:retry', (_event, jobId: unknown) => {
+    if (typeof jobId !== 'string') throw new Error('Invalid run identifier')
+    if (liveJobIds().has(jobId)) return { error: 'This job is still running.' }
+    const request = readRunRequest(loadSettings().outputDirectory, jobId)
+    if (!request) return { error: 'This run’s options weren’t saved. Start it again from Create.' }
+    logger.info('job.retry', { jobId })
+    return startJob(request as ClipJobConfig)
   })
 
   handle('job:cancel', (_event, jobId: unknown) => {

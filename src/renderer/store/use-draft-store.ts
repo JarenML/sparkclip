@@ -35,7 +35,7 @@ export interface ClipDraft {
   captionPreset: string
   /** Language for clip titles; 'auto' follows the video. */
   titleLanguage: string
-  /** Twitch and Kick VODs: plan from a small copy, download each clip at full quality. */
+  /** Twitch and Kick VODs and YouTube videos: plan from a small copy, download each clip at full quality. */
   saveSpace: boolean
   trimOpen: boolean
   trimStart: string
@@ -72,7 +72,7 @@ export const useDraftStore = create<DraftState>((set) => ({
   includeCaptions: true,
   captionPreset: 'pop',
   titleLanguage: 'auto',
-  saveSpace: false,
+  saveSpace: true,
   trimOpen: false,
   trimStart: '',
   trimEnd: '',

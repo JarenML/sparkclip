@@ -1,4 +1,5 @@
 import { kickVod, twitchVodId } from '../shared/video-source'
+import type { ClipJobRequest } from '../shared/jobs'
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { basename, isAbsolute, join, relative, sep } from 'path'
 import { randomUUID } from 'crypto'
@@ -21,6 +22,9 @@ export interface RunRecord {
 
 const RUN_FILE = 'run-history.json'
 const MAX_RECORD_BYTES = 16 * 1024
+/** The options a run started with, so it can run again after a restart. */
+const REQUEST_FILE = 'run-request.json'
+const MAX_REQUEST_BYTES = 32 * 1024
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function runDirectory(baseDir: string, jobId: string): string {
@@ -63,17 +67,38 @@ function validDate(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value))
 }
 
-export function readRunRecord(baseDir: string, jobId: string): RunRecord | null {
+/** A run file's JSON, or null when it is missing, oversized or linked elsewhere. */
+function readRunFile(baseDir: string, jobId: string, name: string, maxBytes: number): unknown {
   let fd: number | null = null
   try {
-    const dir = checkedDirectory(baseDir, jobId)
-    const file = join(dir, RUN_FILE)
+    const file = join(checkedDirectory(baseDir, jobId), name)
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
     const stat = fstatSync(fd)
-    if (!stat.isFile() || stat.size > MAX_RECORD_BYTES) return null
+    if (!stat.isFile() || stat.size > maxBytes) return null
     const fileStat = lstatSync(file)
     if (fileStat.isSymbolicLink() || fileStat.dev !== stat.dev || fileStat.ino !== stat.ino) return null
-    const data: unknown = JSON.parse(readFileSync(fd, 'utf8'))
+    return JSON.parse(readFileSync(fd, 'utf8'))
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) closeSync(fd)
+  }
+}
+
+function writeRunFile(baseDir: string, jobId: string, name: string, data: unknown): void {
+  const dir = checkedDirectory(baseDir, jobId)
+  const temp = join(dir, `${name}.${randomUUID()}.tmp`)
+  try {
+    writeFileSync(temp, JSON.stringify(data), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    renameSync(temp, join(dir, name))
+  } finally {
+    try { unlinkSync(temp) } catch { /* The rename already moved it. */ }
+  }
+}
+
+export function readRunRecord(baseDir: string, jobId: string): RunRecord | null {
+  try {
+    const data = readRunFile(baseDir, jobId, RUN_FILE, MAX_RECORD_BYTES)
     if (!data || typeof data !== 'object') return null
     const record = data as Partial<RunRecord>
     if (record.jobId !== jobId || !validDate(record.startedAt) ||
@@ -88,19 +113,36 @@ export function readRunRecord(baseDir: string, jobId: string): RunRecord | null 
     return record as RunRecord
   } catch {
     return null
-  } finally {
-    if (fd !== null) closeSync(fd)
   }
 }
 
 function writeRunRecord(baseDir: string, record: RunRecord): void {
-  const dir = checkedDirectory(baseDir, record.jobId)
-  const temp = join(dir, `${RUN_FILE}.${randomUUID()}.tmp`)
+  writeRunFile(baseDir, record.jobId, RUN_FILE, record)
+}
+
+/**
+ * Keep the options a run started with in its private run folder. Finished runs
+ * already hold the source link in job_output.json; this lets a failed,
+ * cancelled or interrupted run start again after the app restarts.
+ */
+export function saveRunRequest(baseDir: string, jobId: string, request: ClipJobRequest): void {
+  const saved: ClipJobRequest & { plannerCapabilities?: unknown } = { ...request }
+  // Model capabilities are looked up again when the run starts.
+  delete saved.plannerCapabilities
+  writeRunFile(baseDir, jobId, REQUEST_FILE, saved)
+}
+
+/** The saved options of a run, unvalidated; callers check them as new input. */
+export function readRunRequest(baseDir: string, jobId: string): unknown {
+  return readRunFile(baseDir, jobId, REQUEST_FILE, MAX_REQUEST_BYTES)
+}
+
+export function hasRunRequest(baseDir: string, jobId: string): boolean {
   try {
-    writeFileSync(temp, JSON.stringify(record), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    renameSync(temp, join(dir, RUN_FILE))
-  } finally {
-    try { unlinkSync(temp) } catch { /* The rename already moved it. */ }
+    const stat = lstatSync(join(runDirectory(baseDir, jobId), REQUEST_FILE))
+    return stat.isFile() && stat.size <= MAX_REQUEST_BYTES
+  } catch {
+    return false
   }
 }
 

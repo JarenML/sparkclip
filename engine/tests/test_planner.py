@@ -253,6 +253,20 @@ class TestPlanClips:
             max_duration_seconds=60,
         ))
 
+    def test_start_without_end_plans_until_the_end_of_the_video(self, no_sleep):
+        planner = make_planner()
+        planner._http_client = FakeClient([(200, completion(json.dumps({"clips": [clip(130, 160)]})))])
+        result = asyncio.run(planner.plan_clips(
+            transcript_result=make_transcript(300),
+            video_metadata=SimpleNamespace(duration_seconds=300),
+            max_clips=3,
+            auto_clip_count=False,
+            min_duration_seconds=15,
+            max_duration_seconds=60,
+            start_time_seconds=120,
+        ))
+        assert len(result.segments) == 1
+
     @pytest.mark.parametrize("reported_first", [True, False])
     def test_retry_preserves_reported_cost_when_another_attempt_needs_an_estimate(self, no_sleep, reported_first):
         planner = make_planner(clipping_mode="advanced", planner_model="custom/model", planner_input_price=0.000001, planner_output_price=0.000005)

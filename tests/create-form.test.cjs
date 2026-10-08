@@ -88,6 +88,7 @@ test('clipping mode is selectable and economy disables paid vision in the submit
   const kick = 'https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'
   assert.equal(buildJobRequest({ ...draft, source: kick, saveSpace: true }, { start: null, end: null }).saveSpace, true)
   assert.equal('saveSpace' in buildJobRequest({ ...draft, source: kick, saveSpace: false }, { start: null, end: null }), false)
+  assert.equal(buildJobRequest({ ...draft, source: 'https://youtu.be/SOW3qCJJSlQ', saveSpace: true }, { start: null, end: null }).saveSpace, true)
   // The chosen creator goes with the run, and is left out when none is.
   assert.equal(buildJobRequest({ ...draft, creatorId: '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21' }, { start: null, end: null }).creatorId, '9d0925d9-4a6b-4e10-84f5-9ee9e5bdcd21')
   assert.equal('creatorId' in buildJobRequest({ ...draft, creatorId: '' }, { start: null, end: null }), false)
@@ -274,8 +275,8 @@ test('the trim timeline shows both handles over the source length and open bound
   assert.match(render({ start: 5000, end: 9000 }), /aria-label="Trim start"[^>]*aria-valuenow="3599"/)
 })
 
-test('the save-space switch appears only for Twitch and Kick VODs and shows in Review', () => {
-  const { VideoStep, ReviewStep } = form.exports
+test('the save-space switch appears for Twitch and Kick VODs and YouTube videos, starts on, and shows in Review', () => {
+  const { VideoStep, ReviewStep, useDraftStore } = form.exports
   const draft = {
     source: 'https://example.com/video', trimOpen: false, trimStart: '', trimEnd: '', saveSpace: false,
     clippingMode: 'quality', aspectRatio: '9:16', layoutStyle: 'auto', layoutVision: true, pacing: 'tight', videoSpeed: 1,
@@ -285,6 +286,9 @@ test('the save-space switch appears only for Twitch and Kick VODs and shows in R
   assert.doesNotMatch(video('https://example.com/video'), /Save disk space/)
   assert.match(video('https://kick.com/elzeein/videos/191061c4-3c2e-46e8-83ef-eca789c89b3c'), /aria-label="Save disk space"/)
   assert.match(video('https://www.twitch.tv/videos/12345'), /aria-label="Save disk space"/)
+  assert.match(video('https://www.youtube.com/watch?v=SOW3qCJJSlQ'), /aria-label="Save disk space"/)
+  assert.match(video('https://www.youtube.com/live/SOW3qCJJSlQ'), /aria-label="Save disk space"/)
+  assert.equal(useDraftStore.getState().saveSpace, true)
   const review = (source, saveSpace) => renderToStaticMarkup(React.createElement(ReviewStep, { draft: { ...draft, source, saveSpace }, trim: { start: null, end: null }, onEdit() {} }))
   assert.match(review('https://www.twitch.tv/videos/12345', true), /480p to plan, each clip in full quality/)
   assert.doesNotMatch(review('https://www.twitch.tv/videos/12345', false), /480p to plan/)

@@ -83,9 +83,9 @@ Live channels, Kick clips, subscriber-only videos and deleted VODs are not suppo
 
 **Creators** gathers the people you clip. Add a creator with their YouTube, Twitch and Kick channels (and TikTok, Instagram or X links to open in your browser) to see their latest streams per platform (YouTube shows the channel's Live tab, with a switch to regular videos), with what's new since your last visit and whether they're live. **Clip this** opens a video in Create. Turn on notifications to get a desktop alert when a new stream is up or they go live; SparkClip checks every 15 minutes while it's open. Videos are listed from each platform's public pages and feeds; no account or key is needed.
 
-### Save disk space (Twitch and Kick VODs)
+### Save disk space (Twitch, Kick and YouTube)
 
-Turn on **Save disk space** in Create → Video to keep a VOD job small on disk. SparkClip transcribes and plans from a 480p copy, which deletes itself once the clips are chosen, then downloads each clip's own stretch at full quality, renders it and deletes it. On Kick, 480p carries the same audio as 1080p, so transcription and timing match a normal job. With it off, the full-quality video is downloaded as usual.
+**Save disk space** in Create → Video, on by default, keeps a Twitch, Kick or YouTube job small on disk. SparkClip transcribes and plans from a 480p copy, which deletes itself once the clips are chosen, then downloads each clip's own stretch at full quality, renders it and deletes it. On Kick, 480p carries the same audio as 1080p, and YouTube's audio is a separate full-quality stream, so transcription and timing match a normal job. YouTube windows come as H.264, up to 1080p. If a clip's stretch can't be downloaded on its own, the job downloads the full-quality video once and clips from it. With it off, the full-quality video is downloaded as usual.
 
 ## Develop
 

@@ -467,8 +467,9 @@ class IntelligencePlannerService:
         # Filter transcript segments by time range if specified
         if start_time_seconds is not None or end_time_seconds is not None:
             start_ms = int((start_time_seconds or 0) * 1000)
-            end_ms = int((end_time_seconds or float('inf')) * 1000)
-            
+            # No end means "until the end of the video".
+            end_ms = float('inf') if end_time_seconds is None else int(end_time_seconds * 1000)
+
             original_count = len(transcript)
             transcript = [
                 seg for seg in transcript

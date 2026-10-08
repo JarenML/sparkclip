@@ -9,7 +9,7 @@ import { isAbsolute, join, relative, sep } from 'path'
 import { fileURLToPath } from 'url'
 import { resolveBinary } from './tools'
 import { parseJobOutput, type JobOutput } from '../shared/job-output'
-import { readRunRecord } from './run-history'
+import { hasRunRequest, readRunRecord } from './run-history'
 
 export interface JobHistoryEntry {
   jobId: string
@@ -24,6 +24,8 @@ export interface JobHistoryEntry {
   errorMessage: string | null
   /** The followed creator the run's clips belong to, if one was chosen. */
   creatorId: string | null
+  /** An unfinished run whose options were saved, so it can run again. */
+  canRetry: boolean
 }
 
 const MAX_JOB_OUTPUT_BYTES = 20 * 1024 * 1024
@@ -89,7 +91,8 @@ export async function getJobHistory(baseDir: string, activeJobIds: ReadonlySet<s
           finishedAt: record?.finishedAt ?? result.modified.toISOString(),
           durationMs: durationMs ?? (typeof data.processing_time_seconds === 'number' ? Math.round(data.processing_time_seconds * 1000) : null),
           errorMessage: null,
-          creatorId: record?.creatorId ?? null
+          creatorId: record?.creatorId ?? null,
+          canRetry: false
         })
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -108,7 +111,8 @@ export async function getJobHistory(baseDir: string, activeJobIds: ReadonlySet<s
                   videoTitle: record?.sourceLabel ?? 'Unfinished run', clipCount: 0,
                   status, outputDir: runDir, totalCostUsd: null,
                   finishedAt: record?.finishedAt ?? null, durationMs,
-                  errorMessage: record?.errorMessage ?? null, creatorId: record?.creatorId ?? null })
+                  errorMessage: record?.errorMessage ?? null, creatorId: record?.creatorId ?? null,
+                  canRetry: status !== 'running' && hasRunRequest(baseDir, dir.name) })
               }
             } catch { /* The run directory was removed during the scan. */ }
           }
@@ -117,7 +121,8 @@ export async function getJobHistory(baseDir: string, activeJobIds: ReadonlySet<s
         entries.push({ jobId: dir.name, date: record?.startedAt ?? new Date(0).toISOString(), videoTitle: record?.sourceLabel ?? 'Unreadable run', clipCount: 0,
           status: 'failed', outputDir: join(baseDir, dir.name), totalCostUsd: null,
           finishedAt: record?.finishedAt ?? null, durationMs,
-          errorMessage: record?.errorMessage ?? 'The saved result could not be read.', creatorId: record?.creatorId ?? null })
+          errorMessage: record?.errorMessage ?? 'The saved result could not be read.', creatorId: record?.creatorId ?? null,
+          canRetry: hasRunRequest(baseDir, dir.name) })
       }
     }
   } catch {
