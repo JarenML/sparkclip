@@ -80,22 +80,27 @@ export async function getJson(fetchImpl: FetchLike, url: string, init: RequestIn
   return JSON.parse(new TextDecoder().decode(await readCapped(response, MAX_JSON_BYTES)))
 }
 
-function isThumbnailUrl(value: unknown): value is string {
+function isThumbnailUrl(value: unknown, hosts: readonly RegExp[]): value is string {
   if (typeof value !== 'string') return false
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && !url.username && !url.password && !url.port && THUMBNAIL_HOSTS.some((host) => host.test(url.hostname))
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port && hosts.some((host) => host.test(url.hostname))
   } catch {
     return false
   }
 }
 
-export async function fetchThumbnail(fetchImpl: FetchLike, url: unknown): Promise<string | null> {
-  if (!isThumbnailUrl(url)) return null
+/** An image from one of `hosts` as a data: URL, or null. */
+export async function fetchThumbnail(fetchImpl: FetchLike, url: unknown, hosts: readonly RegExp[] = THUMBNAIL_HOSTS): Promise<string | null> {
+  if (!isThumbnailUrl(url, hosts)) return null
   try {
     const response = await request(fetchImpl, url)
     const type = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
-    if (!IMAGE_TYPES.has(type)) return null
+    if (!IMAGE_TYPES.has(type)) {
+      // E.g. a video at that address: don't download it.
+      void response.body?.cancel().catch(() => {})
+      return null
+    }
     const bytes = await readCapped(response, MAX_IMAGE_BYTES)
     return `data:${type};base64,${Buffer.from(bytes).toString('base64')}`
   } catch {

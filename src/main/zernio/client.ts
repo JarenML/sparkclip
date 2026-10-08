@@ -31,6 +31,12 @@ function asRecord(value: unknown): JsonRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as JsonRecord) : {}
 }
 
+/** The posts in a list response, under whichever key Zernio used. */
+function postList(result: JsonRecord): JsonRecord[] {
+  const list = [result.posts, result.data, result.items, result.externalPosts].find(Array.isArray) as unknown[] | undefined
+  return (list ?? []).map(asRecord)
+}
+
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined
 }
@@ -307,7 +313,7 @@ export class ZernioClient {
   private async request(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<unknown> {
     const startedAt = Date.now()
     // Only static route labels; queries contain OAuth state and profile IDs.
-    const labels = new Set(['profiles', 'accounts', 'connect', 'health', 'tiktok', 'youtube', 'instagram', 'facebook', 'twitter', 'linkedin', 'threads'])
+    const labels = new Set(['profiles', 'accounts', 'connect', 'health', 'posts', 'sync-external', 'tiktok', 'youtube', 'instagram', 'facebook', 'twitter', 'linkedin', 'threads'])
     const operation = path.split('?')[0].split('/').filter(Boolean).map((part) => labels.has(part) ? part : 'item').join('.')
     const context = { traceId: this.traceId, requestId: randomUUID(), method, operation }
     logger.info('zernio.request.start', context)
@@ -591,6 +597,34 @@ export class ZernioClient {
   async retryPost(postId: string, timeoutMs: number): Promise<{ post: JsonRecord; error: string | null }> {
     const { body } = await this.postingRequest('POST', `/posts/${encodeURIComponent(postId)}/retry`, { timeoutMs })
     return { post: asRecord(body.post), error: sanitizeProviderText(body.error, 300) ?? null }
+  }
+
+  /**
+   * One page of an account's posts: those published through Zernio, or those
+   * Zernio found on the platform itself (`external`, synced about every 90 minutes).
+   */
+  async listAccountPosts(accountId: string, source: 'zernio' | 'external', page: number, limit: number): Promise<{ posts: JsonRecord[]; pages: number | null }> {
+    const params = new URLSearchParams({ source, accountId, page: String(page), limit: String(limit) })
+    if (source === 'zernio') params.set('status', 'published')
+    const result = asRecord(await this.request('GET', `/posts?${params}`))
+    const posts = postList(result)
+    const pagination = asRecord(result.pagination)
+    const pages = Number(pagination.pages)
+    // Shapes only, never content or ids: enough to see why a list came back empty.
+    logger.info('zernio.posts.listed', { traceId: this.traceId, source, page, count: posts.length, total: Number.isFinite(Number(pagination.total)) ? Number(pagination.total) : null, fields: Object.keys(result).join(','), itemFields: Object.keys(posts[0] ?? {}).join(',') })
+    return { posts, pages: Number.isFinite(pages) ? pages : null }
+  }
+
+  /**
+   * Reads the account's latest posts from the platform now (Zernio skips the read if it
+   * did one in the last ~15 s) and returns the posts it found.
+   */
+  async syncExternalPosts(accountId: string): Promise<JsonRecord[]> {
+    const result = asRecord(await this.request('POST', '/posts/sync-external', { accountId }))
+    const synced = asRecord(result.synced)
+    const posts = postList(result)
+    logger.info('zernio.posts.synced', { traceId: this.traceId, found: Number(synced.postsFound) || 0, synced: Number(synced.postsSynced) || 0, skipped: synced.skipped === true, count: posts.length, fields: Object.keys(result).join(','), itemFields: Object.keys(posts[0] ?? {}).join(',') })
+    return posts
   }
 
   /** Allowed privacy levels, interaction toggles and limits for a TikTok account. */

@@ -134,3 +134,28 @@ export interface ZernioPendingConnect {
   /** The profile was created for this sign-in (and is removed again if it fails while still empty). */
   createdProfile?: boolean
 }
+
+/** One post on a connected account, as the account's Videos tab shows it. */
+export interface ZernioAccountVideo {
+  /** The platform's post id, or Zernio's id when the platform's isn't known yet. */
+  id: string
+  platform: string
+  /** Its page on the platform's own site; null when there is none yet. */
+  url: string | null
+  caption: string | null
+  publishedAt: string | null
+  mediaType: 'video' | 'image' | 'carousel' | null
+  /** A data: URL, fetched by the main process; null shows a placeholder. */
+  thumbnail: string | null
+  views: number | null
+  likes: number | null
+  comments: number | null
+  /** Posted through Zernio (e.g. from SparkClip) rather than on the platform itself. */
+  viaZernio: boolean
+}
+
+export interface ZernioAccountVideosPage {
+  videos: ZernioAccountVideo[]
+  /** The page "Load more" asks for, or null at the end. */
+  nextPage: number | null
+}

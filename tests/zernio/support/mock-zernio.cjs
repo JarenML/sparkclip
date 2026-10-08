@@ -73,6 +73,10 @@ async function createMockZernio(options = {}) {
     accounts: [],
     /** accountId -> { status, needsReconnect, issues, canPost, tokenValid } */
     health: {},
+    /** accountId -> posts found on the platform (ExternalPostSummary), newest first. */
+    externalPosts: {},
+    /** Account ids POST /v1/posts/sync-external was called for. */
+    externalSyncs: [],
     /** Every API request: { method, path, query, authorized } (the Authorization value is never stored). */
     requests: [],
     /** Connect sessions started via GET /v1/connect/{platform}. */
@@ -142,6 +146,25 @@ async function createMockZernio(options = {}) {
       state.browser[platform] = behaviour
     },
 
+    /** A post published on the platform itself, as GET /v1/posts?source=external returns it. */
+    addExternalPost(accountId, extra = {}) {
+      const account = state.accounts.find((a) => a._id === accountId)
+      const id = String(1_000_000 + (ids += 1))
+      const post = {
+        platform: account?.platform ?? 'tiktok',
+        platformPostId: id,
+        platformPostUrl: `https://www.tiktok.com/@${account?.username ?? 'user'}/video/${id}`,
+        content: `Video ${id}`,
+        publishedAt: new Date(Date.now() - ids * 60_000).toISOString(),
+        mediaType: 'video',
+        thumbnailUrl: null,
+        analytics: { views: 1200, likes: 80, comments: 4 },
+        ...extra
+      }
+      ;(state.externalPosts[accountId] ??= []).push(post)
+      return post
+    },
+
     /** The next matching request fails once with `status`. */
     failNext(method, path, status, body = {}, headers = {}) {
       state.failures.push({ method, path, status, body, headers })
@@ -209,6 +232,29 @@ async function createMockZernio(options = {}) {
   // ---- Built-in API routes (subset of Zernio v1 used by BridgeClip) ----------
   const builtins = [
     { method: 'GET', path: '/api/v1/profiles', handler: (ctx) => ctx.json(200, { profiles: state.profiles }) },
+    {
+      // Listing only; posts made through the mock's posting routes aren't listed here.
+      method: 'GET',
+      path: '/api/v1/posts',
+      handler: (ctx) => {
+        const page = Number(ctx.query.get('page') ?? 1)
+        const limit = Number(ctx.query.get('limit') ?? 10)
+        const all = ctx.query.get('source') === 'external' ? state.externalPosts[ctx.query.get('accountId')] ?? [] : []
+        const pages = Math.max(1, Math.ceil(all.length / limit))
+        return ctx.json(200, { posts: all.slice((page - 1) * limit, page * limit), pagination: { page, limit, total: all.length, pages } })
+      }
+    },
+    {
+      method: 'POST',
+      path: '/api/v1/posts/sync-external',
+      handler: (ctx) => {
+        const accountId = ctx.body && ctx.body.accountId
+        if (!state.accounts.some((a) => a._id === accountId)) return ctx.json(404, { error: 'Account not found' })
+        state.externalSyncs.push(accountId)
+        const found = (state.externalPosts[accountId] ?? []).length
+        return ctx.json(200, { synced: { postsFound: found, postsSynced: found, skipped: false }, posts: state.externalPosts[accountId] ?? [] })
+      }
+    },
     {
       method: 'POST',
       path: '/api/v1/profiles',

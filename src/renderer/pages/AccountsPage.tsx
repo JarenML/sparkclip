@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
-import { ArrowUpRight, ChevronRight, KeyRound, Loader2, Plus, RefreshCw, RotateCw, Unplug, WifiOff, X } from 'lucide-react'
+import { ArrowUpRight, ChevronRight, Film, KeyRound, Loader2, Plus, RefreshCw, RotateCw, Unplug, WifiOff, X } from 'lucide-react'
 import { useSettingsStore } from '../store/use-settings-store'
 import { useAccountsStore, type AccountsNotice } from '../store/use-accounts-store'
 import { useApiKeyDrafts } from '../hooks/use-api-key-drafts'
@@ -19,6 +19,8 @@ import { TextInput } from '../components/ui/Field'
 import { Select } from '../components/ui/Select'
 import { Skeleton } from '../components/ui/Skeleton'
 import { BackLink } from '../components/ClipList'
+import { AccountVideos } from '../components/AccountVideos'
+import { Segmented } from '../components/ui/Segmented'
 import type { Page } from '../components/Sidebar'
 
 const TITLE = 'Accounts'
@@ -129,6 +131,8 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
   const [pending, setPending] = useState<PendingConfirm | null>(null)
   /** The platform whose accounts, across every profile, are open. */
   const [openPlatform, setOpenPlatform] = useState<string | null>(null)
+  /** The account open on its own page, from its platform's page. */
+  const [openAccountId, setOpenAccountId] = useState<string | null>(null)
   const {
     profiles,
     accounts,
@@ -213,6 +217,25 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
     else if (action === 'settings') onNavigate('settings')
   }
 
+  const banner = (
+    <>
+      {notice && <NoticeBar notice={notice} onDismiss={dismissNotice} onAction={openNoticeAction} />}
+      {error && <StaleNotice error={error.message} offline={error.kind === 'offline'} syncedAt={syncedAt} loading={loading} onRetry={() => void load()} />}
+    </>
+  )
+  const openAccount = openAccountId ? accounts.find((a) => a.id === openAccountId) : undefined
+
+  if (openAccount && hasData) {
+    return (
+      <AccountView
+        account={openAccount}
+        profileName={profiles.find((p) => p.id === openAccount.profileId)?.name ?? null}
+        banner={banner}
+        onBack={() => setOpenAccountId(null)}
+      />
+    )
+  }
+
   if (openPlatform && hasData) {
     return (
       <>
@@ -221,12 +244,8 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
           onBack={() => setOpenPlatform(null)}
           onReconnect={askReconnect}
           onDisconnect={askDisconnect}
-          banner={
-            <>
-              {notice && <NoticeBar notice={notice} onDismiss={dismissNotice} onAction={openNoticeAction} />}
-              {error && <StaleNotice error={error.message} offline={error.kind === 'offline'} syncedAt={syncedAt} loading={loading} onRetry={() => void load()} />}
-            </>
-          }
+          onOpenAccount={(account) => setOpenAccountId(account.id)}
+          banner={banner}
         />
         {confirmRequest && <ConfirmDialog request={confirmRequest} onClose={closeConfirm} />}
       </>
@@ -593,8 +612,9 @@ const NEW_PROFILE = '__new__'
  * One platform's accounts across every profile. A profile holds one account
  * per platform, so another account is added into a profile that has none yet.
  */
-function PlatformAccounts({ platform, banner, onBack, onReconnect, onDisconnect }: {
+function PlatformAccounts({ platform, banner, onBack, onReconnect, onDisconnect, onOpenAccount }: {
   platform: string
+  onOpenAccount: (account: ZernioAccount) => void
   /** Notices and sync errors, shown above the list. */
   banner: ReactNode
   onBack: () => void
@@ -710,6 +730,7 @@ function PlatformAccounts({ platform, banner, onBack, onReconnect, onDisconnect 
                   onReconnect={connectable ? () => onReconnect(account) : undefined}
                   onCancel={cancelConnect}
                   onDisconnect={() => onDisconnect(account)}
+                  onOpen={() => onOpenAccount(account)}
                 />
               ))}
               {pendingNew && (
@@ -735,8 +756,9 @@ function PlatformAccounts({ platform, banner, onBack, onReconnect, onDisconnect 
 }
 
 /** One account on the platform page: its handle, its profile and its status. */
-function PlatformAccountRow({ account, profileName, connecting, disconnecting, busy, onReconnect, onCancel, onDisconnect }: {
+function PlatformAccountRow({ account, profileName, connecting, disconnecting, busy, onReconnect, onCancel, onDisconnect, onOpen }: {
   account: ZernioAccount
+  onOpen: () => void
   profileName: string
   connecting: boolean
   disconnecting: boolean
@@ -763,11 +785,19 @@ function PlatformAccountRow({ account, profileName, connecting, disconnecting, b
       data-state={attention ? 'reconnect' : 'connected'}
       className={cn(
         'flex items-center gap-2.5 rounded-xl p-1.5',
-        connecting ? 'border border-accent/30 bg-accent/[0.07]' : attention ? 'border border-warning/25 bg-warning/[0.05]' : 'glass-tile'
+        connecting ? 'border border-accent/30 bg-accent/[0.07]' : attention ? 'border border-warning/25 bg-warning/[0.05]' : 'glass-tile glass-tile-hover'
       )}
     >
-      <PlatformLens platform={account.platform} status={connecting ? 'connecting' : attention ? 'warning' : 'ok'} />
-      <TileText name={label} detail={detail} title={[label, profileName, account.issue].filter(Boolean).join(' · ')} />
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open ${label}`}
+        className="group/tile flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+      >
+        <PlatformLens platform={account.platform} status={connecting ? 'connecting' : attention ? 'warning' : 'ok'} />
+        <TileText name={label} detail={detail} title={[label, profileName, account.issue].filter(Boolean).join(' · ')} />
+        <ChevronRight aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-colors duration-150 group-hover/tile:text-ink" />
+      </button>
       <div className="flex shrink-0 items-center gap-0.5">
         {connecting ? (
           <>
@@ -797,5 +827,42 @@ function PlatformAccountRow({ account, profileName, connecting, disconnecting, b
         )}
       </div>
     </li>
+  )
+}
+
+type AccountTab = 'videos'
+
+/** One account: its posts, with room for more tabs. */
+function AccountView({ account, profileName, banner, onBack }: {
+  account: ZernioAccount
+  profileName: string | null
+  banner: ReactNode
+  onBack: () => void
+}): React.JSX.Element {
+  const [tab, setTab] = useState<AccountTab>('videos')
+  const name = platformName(account.platform)
+  return (
+    <>
+      <PageHeader
+        leading={<BackLink label={name} onClick={onBack} />}
+        title={
+          <span className="flex items-center gap-3">
+            <PlatformLens platform={account.platform} status={accountHealth(account) === 'ok' ? 'ok' : 'warning'} />
+            <span className="truncate">{accountLabel(account)}</span>
+          </span>
+        }
+        description={[name, profileName && `${profileName} profile`].filter(Boolean).join(' · ')}
+      />
+      <div className="mt-4 space-y-3">
+        {banner}
+        <Segmented<AccountTab>
+          label="Account sections"
+          value={tab}
+          onChange={setTab}
+          options={[{ value: 'videos', label: <span className="inline-flex items-center gap-1.5"><Film className="h-3.5 w-3.5" />Videos</span> }]}
+        />
+        {tab === 'videos' && <AccountVideos account={account} />}
+      </div>
+    </>
   )
 }

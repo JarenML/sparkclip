@@ -228,6 +228,33 @@ test('accounts: set up, connect, reconnect, disconnect, recover and work offline
     await shot('12-platforms')
   })
 
+  await t.test('an account page lists the videos on that account, refreshes and loads more', async () => {
+    const channel = mock.state.accounts.find((a) => a.platform === 'youtube' && a.username === 'mychannel')
+    for (let i = 0; i < 25; i += 1) {
+      mock.addExternalPost(channel._id, { platform: 'youtube', platformPostUrl: `https://www.youtube.com/watch?v=vid${i}`, content: `Clip number ${i}` })
+    }
+    const cards = () => page.getByRole('list', { name: 'Videos', exact: true }).locator('li[data-video]')
+    await openPlatform('YouTube')
+    await click('Open youtube creator · @mychannel')
+    await page.getByRole('radio', { name: 'Videos' }).waitFor({ timeout: TIMEOUT })
+    await cards().nth(23).waitFor({ timeout: TIMEOUT })
+    assert.equal(await cards().count(), 24)
+    await cards().first().getByText('Clip number 0', { exact: true }).waitFor()
+    await cards().first().getByText('1.2K views', { exact: false }).waitFor()
+    await shot('13-account-videos')
+
+    await click('Load more')
+    await cards().nth(24).waitFor({ timeout: TIMEOUT })
+    assert.equal(await page.getByRole('button', { name: 'Load more', exact: true }).count(), 0)
+
+    await click('Refresh')
+    await mock.waitFor(() => mock.state.externalSyncs.includes(channel._id))
+    await cards().nth(23).waitFor({ timeout: TIMEOUT })
+
+    await page.getByRole('button', { name: 'YouTube', exact: true }).click()
+    await back()
+  })
+
   await t.test('a 429 keeps the accounts on screen and says when to retry', async () => {
     mock.failNext('GET', '/api/v1/profiles', 429, { error: 'Rate limit exceeded. Please retry after 2 seconds.', details: { retryAfterSeconds: 2 } }, { 'Retry-After': '2' })
     await click('Refresh accounts')
