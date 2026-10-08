@@ -1,4 +1,4 @@
-import { isStreamVod, normalizeVideoSource, vodSourceError } from '../../shared/video-source'
+import { normalizeVideoSource, supportsSaveSpace, vodSourceError } from '../../shared/video-source'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, Clock3, ListVideo, Minus, Plus, Sparkles } from 'lucide-react'
 import { cn, formatTimecode, MOD_KEY, parseTimecode, sourceLabel } from '../lib/utils'
@@ -78,7 +78,7 @@ export function buildJobRequest(draft: ClipDraft, trim: { start: number | null; 
     includeCaptions: draft.includeCaptions,
     captionPreset: draft.captionPreset,
     titleLanguage: draft.titleLanguage,
-    ...(draft.saveSpace && isStreamVod(draft.source) ? { saveSpace: true } : {}),
+    ...(draft.saveSpace && supportsSaveSpace(draft.source) ? { saveSpace: true } : {}),
     startTimeSeconds: trim.start,
     endTimeSeconds: trim.end,
     bannerPlatform: null,
@@ -319,7 +319,7 @@ export function VideoStep({ draft, update, trimError, disabled }: { draft: ClipD
           </p>
         </div>
       )}
-      {isStreamVod(draft.source) && (
+      {supportsSaveSpace(draft.source) && (
         <SettingRow
           title="Save disk space"
           description="Find clips from a small 480p copy (same audio), then download only each clip in full quality."
@@ -600,7 +600,7 @@ export function ReviewStep({ draft, trim, onEdit }: {
   ]
   if (draft.creatorId) rows.splice(1, 0,
     { step: 'video', label: 'Creator', value: creators.find((creator) => creator.id === draft.creatorId)?.name ?? 'Chosen creator' })
-  if (draft.saveSpace && isStreamVod(draft.source)) rows.splice(1, 0,
+  if (draft.saveSpace && supportsSaveSpace(draft.source)) rows.splice(1, 0,
     { step: 'video', label: 'Disk', value: 'Save space · 480p to plan, each clip in full quality' })
   if (draft.clippingMode === 'advanced') rows.splice(rows.findIndex((row) => row.label === 'Clips'), 0,
     { step: 'clips', label: 'Transcribe', value: draft.transcriptionModel || 'Choose a model' },

@@ -33,6 +33,8 @@ from botocore.config import Config as BotocoreConfig
 from clip_engine.config import get_settings
 from clip_engine.error_policy import NETWORK_ERRORS, is_disk_full, is_unreachable
 from clip_engine.network_policy import guarded_public_connections, resolve_public_destination
+from clip_engine.services.dash_window import (INDEX_PROBE_BYTES, MAX_INDEX_BYTES, ByteWindow, IndexNeedsMoreBytes,
+                                              parse_dash_index, pick_window_formats, window_bytes)
 from clip_engine.services.media_process import (guarded_ytdlp_children, run_media,
                                                 validate_video_dimensions, MediaProcessError)
 
@@ -55,8 +57,12 @@ WINDOW_PAD_SECONDS = 2
 # Enough of a segment's start to hold its first audio and video packets.
 SEGMENT_PROBE_BYTES = 1024 * 1024
 # Save-space jobs transcribe and plan from this variant. On Kick, 480p and up
-# carry bit-identical audio; 360p and below are more compressed.
+# carry bit-identical audio; 360p and below are more compressed. YouTube's
+# audio is a separate stream, so its planning copy has the full-quality track.
 SAVE_SPACE_HEIGHT = 480
+# YouTube serves ranges in chunks of this size at most (yt-dlp's http_chunk_size);
+# bigger requests get throttled.
+YOUTUBE_CHUNK_BYTES = 10 * 1024 * 1024
 # Playlist-wide tags that only appear before the first segment.
 HLS_HEADER_TAGS = (
     "#EXTM3U", "#EXT-X-VERSION", "#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE",
@@ -601,10 +607,10 @@ class VideoDownloaderService:
             section: Optional (start, end) seconds the job will use. Twitch and
                 Kick VODs then download only that part (see SectionYoutubeDL);
                 the result's timeline_offset_seconds says where it starts.
-            save_space: For a Twitch or Kick VOD, download a small copy for
-                transcription and planning (SAVE_SPACE_HEIGHT, whose audio
-                matches full quality) and keep its info in vod_info, so each
-                clip's window can then come from download_vod_window.
+            save_space: For a Twitch, Kick or YouTube video, download a small
+                copy for transcription and planning (SAVE_SPACE_HEIGHT, whose
+                audio matches full quality) and keep its info in vod_info, so
+                each clip's window can then come from download_vod_window.
             
         Returns:
             DownloadResult with path and metadata
@@ -632,7 +638,10 @@ class VideoDownloaderService:
                     max_height=SAVE_SPACE_HEIGHT if save_space else None, keep_info=save_space,
                 )
             elif source_type == "youtube":
-                result = await self._download_from_youtube(url, output_path, output_dir, max_duration_seconds)
+                result = await self._download_from_youtube(
+                    url, output_path, output_dir, max_duration_seconds,
+                    max_height=SAVE_SPACE_HEIGHT if save_space else None, keep_info=save_space,
+                )
             else:
                 result = await self._download_direct_url(url, output_path)
 
@@ -740,6 +749,10 @@ class VideoDownloaderService:
         if max_height and source_type in VOD_PLATFORMS:
             # Falls back to the best stream if no variant is that small.
             format_selectors = [f"b[height<={max_height}][vcodec!^=av01]", *format_selectors]
+        elif max_height:
+            # YouTube: a small video stream with the best audio, the same
+            # audio each clip's window gets.
+            format_selectors = [f"bv*[height<={max_height}][vcodec!^=av01]+ba/b[height<={max_height}][vcodec!^=av01]", *format_selectors]
 
         # Run download in thread pool to not block event loop
         loop = asyncio.get_event_loop()
@@ -923,6 +936,8 @@ class VideoDownloaderService:
         """
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, output_filename)
+        if source_type == "youtube":
+            return await self._download_youtube_window(info, start_seconds, end_seconds, output_dir, output_path)
         try:
             return await self._download_from_youtube(
                 info.get("webpage_url") or "", output_path, output_dir, source_type=source_type,
@@ -932,6 +947,120 @@ class VideoDownloaderService:
         except Exception:
             self._remove_partial_files(output_path)
             raise
+
+    async def _download_youtube_window(
+        self, info: dict, start_seconds: float, end_seconds: float, output_dir: str, output_path: str,
+    ) -> DownloadResult:
+        """One clip's stretch of a YouTube video at full quality, by byte ranges (see dash_window).
+
+        Fetches each stream's init section and the fragments around the window
+        through the guarded network stack, then joins them with FFmpeg without
+        re-encoding. Anything that goes wrong other than a full disk or the
+        deadline raises "window_unavailable", so the job falls back to a full
+        download.
+        """
+        deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
+        picked = pick_window_formats(info)
+        if not picked:
+            raise VideoDownloadError("YouTube window unavailable", reason="window_unavailable")
+        video_format, audio_format = picked
+        video_path = output_path + ".video.mp4"
+        audio_path = output_path + ".audio.m4a"
+
+        def fetch() -> float:
+            opts = {"proxy": "", "quiet": True, "no_warnings": True, "socket_timeout": 30, "nocheckcertificate": False}
+            with guarded_public_connections(), yt_dlp.YoutubeDL(opts) as ydl:
+                video = self._fetch_dash_window(ydl, video_format, start_seconds, end_seconds, WINDOW_PAD_SECONDS,
+                                                video_path, output_dir, deadline)
+                # The audio covers at least the video's fragments.
+                audio = self._fetch_dash_window(ydl, audio_format, video.start_seconds, video.end_seconds, 0,
+                                                audio_path, output_dir, deadline)
+            starts = [video.start_seconds, audio.start_seconds]
+            origin = min(starts)
+            # FFmpeg moves each input to zero; put them back at their distance
+            # from the earlier one so they stay in sync.
+            run_media([
+                "ffmpeg", "-v", "error", "-y",
+                "-itsoffset", f"{starts[0] - origin:.6f}", "-i", video_path,
+                "-itsoffset", f"{starts[1] - origin:.6f}", "-i", audio_path,
+                "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", output_path,
+            ], timeout=PROBE_TIMEOUT_SECONDS * 10, check=True)
+            return origin
+
+        try:
+            origin = await asyncio.get_event_loop().run_in_executor(None, fetch)
+            if time.monotonic() > deadline:
+                raise VideoDownloadError("Video download deadline exceeded")
+            metadata = await self._get_video_metadata_ffprobe(output_path)
+        except Exception as e:
+            self._remove_partial_files(output_path)
+            if is_disk_full(e) or (isinstance(e, VideoDownloadError) and "deadline" in str(e)):
+                raise
+            logger.warning("Could not download a YouTube clip window (%s)", type(e).__name__)
+            raise VideoDownloadError("YouTube window unavailable", reason="window_unavailable") from e
+        finally:
+            for path in (video_path, audio_path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        metadata.title = info.get("title") or metadata.title
+        metadata.source_type = "youtube"
+        logger.info("Downloaded a %.0fs YouTube window from %.3fs", metadata.duration_seconds, origin)
+        return DownloadResult(
+            video_path=output_path,
+            metadata=metadata,
+            file_size_bytes=os.path.getsize(output_path),
+            source_type="youtube",
+            timeline_offset_seconds=round(origin, 3),
+            source_duration_seconds=float(info["duration"]) if isinstance(info.get("duration"), (int, float)) else None,
+        )
+
+    def _fetch_dash_window(
+        self, ydl: yt_dlp.YoutubeDL, fmt: dict, start_seconds: float, end_seconds: float, pad_seconds: float,
+        path: str, output_dir: str, deadline: float,
+    ) -> ByteWindow:
+        """Write one stream's init section and the fragments around the window to `path`."""
+        headers = fmt.get("http_headers") or {}
+
+        def read(first: int, last: int) -> bytes:
+            if time.monotonic() > deadline:
+                raise VideoDownloadError("Video download deadline exceeded")
+            request = yt_dlp.networking.Request(fmt["url"], headers={**headers, "Range": f"bytes={first}-{last}"})
+            with ydl.urlopen(request) as response:
+                # One byte more than asked shows a server that ignored the range.
+                data = response.read(last - first + 2)
+            if len(data) != last - first + 1:
+                raise VideoDownloadError("YouTube returned an unexpected range", reason="window_unavailable")
+            return data
+
+        size = fmt.get("filesize")
+        head = read(0, (min(INDEX_PROBE_BYTES, int(size)) if size else INDEX_PROBE_BYTES) - 1)
+        try:
+            index = parse_dash_index(head)
+        except IndexNeedsMoreBytes as more:
+            index = None
+            if more.needed <= MAX_INDEX_BYTES:
+                head = read(0, more.needed - 1)
+                try:
+                    index = parse_dash_index(head)
+                except IndexNeedsMoreBytes:
+                    index = None
+        window = window_bytes(index, start_seconds, end_seconds, pad_seconds) if index else None
+        if not window:
+            raise VideoDownloadError("YouTube window unavailable", reason="window_unavailable")
+        total = index.init_size + window.last_byte - window.first_byte + 1
+        self._check_source_size(total)
+        self._check_free_space(output_dir, total)
+        chunk = int((fmt.get("downloader_options") or {}).get("http_chunk_size") or YOUTUBE_CHUNK_BYTES)
+        with open(path, "wb") as handle:
+            handle.write(head[:index.init_size])
+            position = window.first_byte
+            while position <= window.last_byte:
+                last = min(position + chunk - 1, window.last_byte)
+                handle.write(read(position, last))
+                position = last + 1
+        return window
 
     async def _download_from_s3(
         self,
