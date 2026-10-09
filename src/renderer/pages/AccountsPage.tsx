@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
-import { ArrowUpRight, ChevronRight, Film, KeyRound, Loader2, Plus, RefreshCw, RotateCw, Unplug, WifiOff, X } from 'lucide-react'
+import { ArrowUpRight, CalendarClock, ChevronRight, Film, KeyRound, Loader2, Plus, RefreshCw, RotateCw, Unplug, WifiOff, X } from 'lucide-react'
 import { useSettingsStore } from '../store/use-settings-store'
 import { useAccountsStore, type AccountsNotice } from '../store/use-accounts-store'
 import { useApiKeyDrafts } from '../hooks/use-api-key-drafts'
@@ -20,6 +20,10 @@ import { Select } from '../components/ui/Select'
 import { Skeleton } from '../components/ui/Skeleton'
 import { BackLink } from '../components/ClipList'
 import { AccountVideos } from '../components/AccountVideos'
+import { AccountScheduled } from '../components/AccountScheduled'
+import { AccountAvatar } from '../components/AccountAvatar'
+import { usePostsStore, usePostsSync } from '../store/use-posts-store'
+import { scheduledPostsFor } from '../../shared/zernio-posts'
 import { Segmented } from '../components/ui/Segmented'
 import type { Page } from '../components/Sidebar'
 
@@ -232,6 +236,7 @@ function ConnectedAccounts({ onNavigate }: { onNavigate: (page: Page) => void })
         profileName={profiles.find((p) => p.id === openAccount.profileId)?.name ?? null}
         banner={banner}
         onBack={() => setOpenAccountId(null)}
+        onOpenLibrary={() => onNavigate('library')}
       />
     )
   }
@@ -794,7 +799,7 @@ function PlatformAccountRow({ account, profileName, connecting, disconnecting, b
         aria-label={`Open ${label}`}
         className="group/tile flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
-        <PlatformLens platform={account.platform} status={connecting ? 'connecting' : attention ? 'warning' : 'ok'} />
+        <AccountAvatar account={account} status={connecting ? 'connecting' : attention ? 'warning' : 'ok'} />
         <TileText name={label} detail={detail} title={[label, profileName, account.issue].filter(Boolean).join(' · ')} />
         <ChevronRight aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-colors duration-150 group-hover/tile:text-ink" />
       </button>
@@ -830,16 +835,20 @@ function PlatformAccountRow({ account, profileName, connecting, disconnecting, b
   )
 }
 
-type AccountTab = 'videos'
+type AccountTab = 'videos' | 'scheduled'
 
-/** One account: its posts, with room for more tabs. */
-function AccountView({ account, profileName, banner, onBack }: {
+/** One account: what's on it (Videos) and what SparkClip will post to it (Scheduled). */
+function AccountView({ account, profileName, banner, onBack, onOpenLibrary }: {
   account: ZernioAccount
   profileName: string | null
   banner: ReactNode
   onBack: () => void
+  onOpenLibrary: () => void
 }): React.JSX.Element {
   const [tab, setTab] = useState<AccountTab>('videos')
+  // The Scheduled tab's count shows from the start, so the history syncs while the account is open.
+  usePostsSync()
+  const scheduled = usePostsStore((state) => scheduledPostsFor(state.posts, account.id).length)
   const name = platformName(account.platform)
   return (
     <>
@@ -847,7 +856,7 @@ function AccountView({ account, profileName, banner, onBack }: {
         leading={<BackLink label={name} onClick={onBack} />}
         title={
           <span className="flex items-center gap-3">
-            <PlatformLens platform={account.platform} status={accountHealth(account) === 'ok' ? 'ok' : 'warning'} />
+            <AccountAvatar account={account} size="lg" status={accountHealth(account) === 'ok' ? 'ok' : 'warning'} />
             <span className="truncate">{accountLabel(account)}</span>
           </span>
         }
@@ -859,9 +868,21 @@ function AccountView({ account, profileName, banner, onBack }: {
           label="Account sections"
           value={tab}
           onChange={setTab}
-          options={[{ value: 'videos', label: <span className="inline-flex items-center gap-1.5"><Film className="h-3.5 w-3.5" />Videos</span> }]}
+          options={[
+            { value: 'videos', label: <span className="inline-flex items-center gap-1.5"><Film className="h-3.5 w-3.5" />Videos</span> },
+            {
+              value: 'scheduled',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <CalendarClock className="h-3.5 w-3.5" />Scheduled
+                  {scheduled > 0 && <span className="rounded-full bg-white/[0.08] px-1.5 font-mono text-[10px] tabular leading-4 text-ink-muted">{scheduled}</span>}
+                </span>
+              )
+            }
+          ]}
         />
         {tab === 'videos' && <AccountVideos account={account} />}
+        {tab === 'scheduled' && <AccountScheduled account={account} onOpenLibrary={onOpenLibrary} />}
       </div>
     </>
   )

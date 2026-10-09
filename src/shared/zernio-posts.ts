@@ -319,6 +319,21 @@ export interface TikTokAccountOptions {
 
 export const EMPTY_TIKTOK_ACCOUNT: TikTokAccountOptions = { privacyLevel: '', allowComment: false, allowDuet: false, allowStitch: false }
 
+/**
+ * What a TikTok account starts with in the post dialog: the choices most posts
+ * use (Everyone, and every interaction the creator allows). The user's own
+ * choice; TikTok's guidelines ask apps to start these unset, so this is a
+ * deliberate departure. The music and branded content agreement is never preset.
+ */
+export function tiktokAccountDefaults(info: Pick<TikTokCreatorInfo, 'privacyLevels' | 'interactions'>): TikTokAccountOptions {
+  return {
+    privacyLevel: info.privacyLevels.some((level) => level.value === 'PUBLIC_TO_EVERYONE') ? 'PUBLIC_TO_EVERYONE' : '',
+    allowComment: info.interactions.comment,
+    allowDuet: info.interactions.duet,
+    allowStitch: info.interactions.stitch
+  }
+}
+
 export interface TikTokPostOptions {
   /** By TikTok account id. */
   accounts: Record<string, TikTokAccountOptions>
@@ -427,4 +442,11 @@ export interface PostsRefreshResult {
 const ACTIVE: PostStatus[] = ['scheduled', 'publishing']
 export function isPostActive(post: Pick<PostRecord, 'status'>): boolean {
   return ACTIVE.includes(post.status)
+}
+
+/** Posts still waiting to go out to `accountId` (scheduled, or publishing now), soonest first. */
+export function scheduledPostsFor(posts: readonly PostRecord[], accountId: string): PostRecord[] {
+  return posts
+    .filter((post) => (post.status === 'scheduled' || post.status === 'publishing') && post.targets.some((target) => target.accountId === accountId))
+    .sort((a, b) => (a.scheduledFor ?? a.createdAt).localeCompare(b.scheduledFor ?? b.createdAt))
 }

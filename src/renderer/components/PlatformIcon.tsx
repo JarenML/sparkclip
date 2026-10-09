@@ -1,50 +1,54 @@
 import type { CSSProperties } from 'react'
-import { AtSign, Facebook, Instagram, Linkedin, Music2, Share2, Youtube, type LucideIcon } from 'lucide-react'
+import { Share2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { ZERNIO_PLATFORM_NAMES, type ZernioPlatform } from '../../shared/zernio'
+import { PLATFORM_MARKS } from './brand/PlatformMarks'
 
 interface PlatformInfo {
   name: string
-  icon: LucideIcon | null
   /** Shown under the name; only for requirements that decide whether connecting works. */
   note?: string
 }
 
 export const PLATFORM_INFO: Record<ZernioPlatform, PlatformInfo> = {
-  tiktok: { name: ZERNIO_PLATFORM_NAMES.tiktok, icon: Music2 },
-  youtube: { name: ZERNIO_PLATFORM_NAMES.youtube, icon: Youtube, note: 'Clips under 3 minutes post as Shorts' },
-  instagram: { name: ZERNIO_PLATFORM_NAMES.instagram, icon: Instagram, note: 'Needs a Business or Creator account' },
-  facebook: { name: ZERNIO_PLATFORM_NAMES.facebook, icon: Facebook, note: 'Posts to a Page you manage' },
-  // X has no Lucide glyph; XGlyph draws the mark, monochrome like the rest.
-  twitter: { name: ZERNIO_PLATFORM_NAMES.twitter, icon: null, note: 'Zernio needs a card on file for X' },
-  linkedin: { name: ZERNIO_PLATFORM_NAMES.linkedin, icon: Linkedin, note: 'Your profile or a company Page' },
-  threads: { name: ZERNIO_PLATFORM_NAMES.threads, icon: AtSign }
+  tiktok: { name: ZERNIO_PLATFORM_NAMES.tiktok },
+  youtube: { name: ZERNIO_PLATFORM_NAMES.youtube, note: 'Clips under 3 minutes post as Shorts' },
+  instagram: { name: ZERNIO_PLATFORM_NAMES.instagram, note: 'Needs a Business or Creator account' },
+  facebook: { name: ZERNIO_PLATFORM_NAMES.facebook, note: 'Posts to a Page you manage' },
+  twitter: { name: ZERNIO_PLATFORM_NAMES.twitter, note: 'Zernio needs a card on file for X' },
+  linkedin: { name: ZERNIO_PLATFORM_NAMES.linkedin, note: 'Your profile or a company Page' },
+  threads: { name: ZERNIO_PLATFORM_NAMES.threads }
 }
 
-/**
- * A faint glow of each platform's colour at the foot of its lens. The glyph
- * itself stays white: the tint says which platform, it doesn't shout it.
- */
-const BRAND_TINT: Record<string, string> = {
-  tiktok: '37 244 238',
-  youtube: '255 40 70',
-  instagram: '225 48 108',
-  facebook: '24 119 242',
-  twitter: '150 160 180',
-  linkedin: '10 102 194',
-  threads: '150 160 180'
+/** Each platform's app-icon background, behind its white mark. */
+const BRAND_BACKGROUND: Record<string, string> = {
+  tiktok: '#000000',
+  youtube: '#ff0033',
+  instagram: 'linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%)',
+  facebook: '#0866ff',
+  twitter: '#000000',
+  linkedin: '#0a66c2',
+  threads: '#000000',
+  // Connected in Zernio itself; SparkClip doesn't offer it.
+  pinterest: '#e60023'
+}
+
+/** X's mark, drawn here; the others come from Simple Icons. */
+const X_MARK = 'M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z'
+
+/** The platform's mark as a monochrome 24×24 glyph, or null for one SparkClip doesn't know. */
+export function PlatformMark({ platform, className }: { platform: string; className?: string }): React.JSX.Element | null {
+  const path = platform === 'twitter' ? X_MARK : PLATFORM_MARKS[platform]
+  if (!path) return null
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d={path} />
+    </svg>
+  )
 }
 
 export function platformName(platform: string): string {
   return (PLATFORM_INFO as Record<string, PlatformInfo>)[platform]?.name ?? platform.charAt(0).toUpperCase() + platform.slice(1)
-}
-
-function XGlyph({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
-      <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z" />
-    </svg>
-  )
 }
 
 interface PlatformIconProps {
@@ -55,25 +59,23 @@ interface PlatformIconProps {
 }
 
 export function PlatformIcon({ platform, className, variant = 'tile' }: PlatformIconProps): React.JSX.Element {
-  const info = (PLATFORM_INFO as Record<string, PlatformInfo | undefined>)[platform]
-  const Icon = info ? info.icon : Share2
-  const glyph = Icon ? <Icon className="h-4 w-4" strokeWidth={1.9} /> : <XGlyph className="h-[14px] w-[14px]" />
+  const mark = PlatformMark({ platform, className: 'h-[18px] w-[18px]' })
+  const glyph = mark ?? <Share2 className="h-4 w-4" strokeWidth={1.9} />
 
   if (variant === 'glyph') {
     return <span aria-hidden className={cn('inline-flex shrink-0 items-center justify-center text-ink [&_svg]:h-3 [&_svg]:w-3', className)}>{glyph}</span>
   }
 
-  const tint = BRAND_TINT[platform]
-  const style: CSSProperties = {
-    backgroundColor: tint ? `rgb(${tint} / 0.22)` : 'rgb(255 255 255 / 0.08)'
-  }
+  const background = BRAND_BACKGROUND[platform]
+  const style: CSSProperties = { background: background ?? 'rgb(255 255 255 / 0.08)' }
   return (
     <span
       aria-hidden
+      data-platform-icon={platform}
       style={style}
       className={cn(
-        'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink',
-        'shadow-[inset_0_1px_0_rgb(255_255_255/0.2),inset_0_0_0_1px_rgb(255_255_255/0.1),0_6px_16px_-8px_rgb(0_0_0/0.6)]',
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white',
+        'shadow-[inset_0_1px_0_rgb(255_255_255/0.2),inset_0_0_0_1px_rgb(255_255_255/0.14),0_6px_16px_-8px_rgb(0_0_0/0.6)]',
         className
       )}
     >

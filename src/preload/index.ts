@@ -104,6 +104,8 @@ export interface BridgeClipAPI {
       /** Opens a post on its platform's site. */
       open: (url: string, platform: string) => Promise<void>
     }
+    /** The account's profile picture as a data: URL, or null. */
+    accountPicture: (accountId: string) => Promise<string | null>
     onConnectResult: (callback: (result: ZernioConnectResult) => void) => () => void
     /** The Zernio key was added, replaced or removed; drop anything from the previous workspace. */
     onReset: (callback: (state: { configured: boolean }) => void) => () => void
@@ -259,6 +261,7 @@ const api: BridgeClipAPI = {
       list: (accountId, page, refresh, platform) => ipcRenderer.invoke('zernio:videos:list', accountId, page, refresh, platform),
       open: (url, platform) => ipcRenderer.invoke('zernio:videos:open', url, platform)
     },
+    accountPicture: (accountId) => ipcRenderer.invoke('zernio:accountPicture', accountId),
     onConnectResult: (callback) => subscribe('zernio:connectResult', callback),
     onReset: (callback) => subscribe('zernio:reset', callback),
     posts: {

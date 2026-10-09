@@ -22,6 +22,7 @@ import {
   isZernioPlatform,
   isValidProfileName,
   ZERNIO_PLATFORM_NAMES,
+  isPictureUrl,
   type ZernioAccount,
   type ZernioConnectResult,
   type ZernioConnectStart,
@@ -134,7 +135,8 @@ function cachedAccount(value: unknown): ZernioAccount | null {
     issue: text(row.issue, 160),
     canPost: typeof row.canPost === 'boolean' ? row.canPost : null,
     integrationLane: row.platform === 'tiktok' && (row.integrationLane === 'business' || row.integrationLane === 'developer') ? row.integrationLane : null,
-    ...(row.overLimit === true ? { overLimit: true } : {})
+    ...(row.overLimit === true ? { overLimit: true } : {}),
+    pictureUrl: isPictureUrl(row.pictureUrl) ? row.pictureUrl : null
   }
 }
 
