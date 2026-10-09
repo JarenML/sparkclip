@@ -66,6 +66,19 @@ export interface ZernioAccount {
   integrationLane?: 'business' | 'developer' | null
   /** In a profile over a legacy plan's limit. */
   overLimit?: boolean
+  /** The platform's link to the profile picture; only the main process loads it (zernio.accountPicture). */
+  pictureUrl?: string | null
+}
+
+/** An https link with no credentials, up to 2048 characters: the only picture links kept. */
+export function isPictureUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 2048) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password
+  } catch {
+    return false
+  }
 }
 
 export interface ZernioOverview {

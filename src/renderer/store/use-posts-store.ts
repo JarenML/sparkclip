@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { create } from 'zustand'
 import { getApi } from '../lib/ipc'
 import { errorMessage } from '../lib/utils'
@@ -133,3 +134,22 @@ export const usePostsStore = create<PostsState>((set, get) => {
     clearError: () => set({ error: null })
   }
 })
+
+/** Statuses only change on Zernio's side; the main process decides which posts are worth a request. */
+const POLL_MS = 30_000
+
+/** While mounted: loads the history, then keeps statuses current every 30 s and on focus. */
+export function usePostsSync(): void {
+  useEffect(() => {
+    void usePostsStore.getState().load().then(() => usePostsStore.getState().refresh(false))
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void usePostsStore.getState().refresh(false)
+    }, POLL_MS)
+    const onFocus = (): void => void usePostsStore.getState().refresh(false)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+}

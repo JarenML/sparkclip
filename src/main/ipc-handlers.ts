@@ -49,7 +49,7 @@ import {
   reschedulePost,
   retryPost
 } from './zernio/posts'
-import { listAccountVideos, openAccountVideo } from './zernio/account-videos'
+import { accountPicture, listAccountVideos, openAccountVideo } from './zernio/account-videos'
 
 /** A passing engine check is reused briefly, so queuing several videos stays quick. */
 const ENGINE_CHECK_TTL_MS = 5 * 60 * 1000
@@ -95,6 +95,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   handle('zernio:disconnect', (_event, accountId: unknown) => disconnectZernioAccount(accountId))
   handle('zernio:videos:list', (_event, accountId: unknown, page: unknown, refresh: unknown, platform: unknown) => listAccountVideos(accountId, page, refresh, platform))
   handle('zernio:videos:open', (_event, url: unknown, platform: unknown) => openAccountVideo(url, platform))
+  handle('zernio:accountPicture', (_event, accountId: unknown) => accountPicture(accountId))
 
   // Posting clips through Zernio. Uploads and post links stay in the main process.
   handle('zernio:posts:probe', (_event, clipPath: unknown, durationMs: unknown) => probeClipForPosting(clipPath, durationMs))

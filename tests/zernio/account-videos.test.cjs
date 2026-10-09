@@ -77,7 +77,8 @@ test('merges platform posts with ones posted through Zernio, newest first, safel
   assert.equal(both.viaZernio, true)
   assert.equal(both.views, 1500)
   assert.equal(both.caption, 'Look at [link]')
-  assert.deepEqual(zernio.calls.sync, [])
+  // One saved cover failed (the unknown host), so Zernio was asked once for fresh links.
+  assert.deepEqual(zernio.calls.sync, [ACCOUNT])
 })
 
 test('later pages read only the platform list; refresh syncs first and survives a failed sync', async () => {
@@ -136,4 +137,49 @@ test('a post without a thumbnail gets the cover TikTok shows for it', async () =
   // TikTok turned the first request away; the next listing asks again and gets the cover.
   assert.equal((await videos.listAccountVideos(ACCOUNT, 1, false, null, { client: zernio, fetchImpl })).videos[0].thumbnail, null)
   assert.equal((await videos.listAccountVideos(ACCOUNT, 1, false, null, { client: zernio, fetchImpl })).videos[0].thumbnail, 'data:image/jpeg;base64,CQ==')
+})
+
+test('an account picture comes only from its saved link on a platform image host', async () => {
+  const fetched = []
+  const fetchImpl = async (url) => {
+    fetched.push(url)
+    return new Response(new Uint8Array([7]), { status: 200, headers: { 'content-type': 'image/jpeg' } })
+  }
+  const saved = {
+    [ACCOUNT]: { id: ACCOUNT, platform: 'tiktok', pictureUrl: 'https://p16-sign-va.tiktokcdn.com/avatar.jpeg' },
+    ['b'.repeat(24)]: { id: 'b'.repeat(24), platform: 'tiktok', pictureUrl: 'https://evil.example.com/avatar.jpeg' }
+  }
+  const findAccount = (id) => saved[id]
+  assert.equal(await videos.accountPicture(ACCOUNT, { fetchImpl, findAccount }), 'data:image/jpeg;base64,Bw==')
+  assert.equal(await videos.accountPicture('b'.repeat(24), { fetchImpl, findAccount }), null)
+  assert.equal(await videos.accountPicture('c'.repeat(24), { fetchImpl, findAccount }), null)
+  assert.equal(await videos.accountPicture('../x', { fetchImpl, findAccount }), null)
+  assert.deepEqual(fetched, ['https://p16-sign-va.tiktokcdn.com/avatar.jpeg'])
+  // Zernio usually serves its own copy of the picture.
+  saved['d'.repeat(24)] = { id: 'd'.repeat(24), platform: 'tiktok', pictureUrl: 'https://media.zernio.com/avatars/me.jpg' }
+  assert.equal(await videos.accountPicture('d'.repeat(24), { fetchImpl, findAccount }), 'data:image/jpeg;base64,Bw==')
+})
+
+test('an expired cover link is replaced by the fresh one a single sync returns', async () => {
+  // Its own account: the repair sync is shared per account for a minute.
+  const FRESH = 'e'.repeat(24)
+  const stale = 'https://p16-common-sign.tiktokcdn.com/cover.jpeg?x-expires=1'
+  const fresh = 'https://p16-common-sign.tiktokcdn.com/cover.jpeg?x-expires=2'
+  const fetchImpl = async (url) => url === fresh
+    ? new Response(new Uint8Array([5]), { status: 200, headers: { 'content-type': 'image/jpeg' } })
+    : new Response('Forbidden', { status: 403 })
+  const post = (id, link) => external(id, { mediaItems: [{ type: 'video', url: link }] })
+  const zernio = client({ externalPosts: [post('11', stale), post('12', stale + '2'), external('13')], syncedPosts: [post('11', fresh), post('12', fresh)] })
+  const page = await videos.listAccountVideos(FRESH, 1, false, null, { client: zernio, fetchImpl })
+  assert.deepEqual(page.videos.map((v) => Boolean(v.thumbnail)), [true, true, false])
+  assert.deepEqual(zernio.calls.sync, [FRESH], 'one sync for every failed cover')
+  // Opening the account again right away reuses that sync instead of one Zernio would skip.
+  const again = await videos.listAccountVideos(FRESH, 1, false, null, { client: zernio, fetchImpl })
+  assert.deepEqual(again.videos.map((v) => Boolean(v.thumbnail)), [true, true, false])
+  assert.deepEqual(zernio.calls.sync, [FRESH])
+
+  // Nothing to refresh when covers load, or when a post has no saved link at all.
+  const quiet = client({ externalPosts: [external('14')] })
+  await videos.listAccountVideos(FRESH, 1, false, null, { client: quiet, fetchImpl })
+  assert.deepEqual(quiet.calls.sync, [])
 })

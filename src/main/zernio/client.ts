@@ -1,4 +1,4 @@
-import { isZernioId, isZernioPlatform, type ZernioAccount, type ZernioPlatform, type ZernioProfile } from '../../shared/zernio'
+import { isPictureUrl, isZernioId, isZernioPlatform, type ZernioAccount, type ZernioPlatform, type ZernioProfile } from '../../shared/zernio'
 import { isIP } from 'net'
 import { readResponseText } from '../http-response'
 import { assertPublicWebUrl, isPublicAddress } from '../network-policy'
@@ -284,7 +284,8 @@ function parseAccount(item: unknown): ZernioAccount | null {
     // Zernio sets this once the platform reports the token as dead.
     needsReconnect: account.needsReconnection === true,
     issue: null,
-    canPost: null
+    canPost: null,
+    pictureUrl: isPictureUrl(account.profilePicture) ? account.profilePicture : null
   }
 }
 

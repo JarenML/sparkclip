@@ -9,6 +9,7 @@ import { usePostsStore } from '../store/use-posts-store'
 import { isPostableAccount, isZernioPlatform, ZERNIO_PLATFORMS, type ZernioAccount, type ZernioPlatform } from '../../shared/zernio'
 import {
   EMPTY_TIKTOK_ACCOUNT,
+  tiktokAccountDefaults,
   PLATFORM_RULES,
   TIKTOK_PRIVACY_LABELS,
   YOUTUBE_TITLE_MAX,
@@ -254,6 +255,16 @@ export function PostDialog({ clips, onClose, onNavigate }: PostDialogProps): Rea
     })
     setCreatorInfoRetry((revision) => revision + 1)
   }
+
+  // Each TikTok account starts with the usual choices once its settings arrive;
+  // only accounts with no choices yet, so a change the user made stays.
+  useEffect(() => {
+    const seeded: Record<string, TikTokAccountOptions> = {}
+    for (const info of tiktokInfos) {
+      if (!tiktok.accounts[info.accountId]) seeded[info.accountId] = tiktokAccountDefaults(info)
+    }
+    if (Object.keys(seeded).length > 0) setTiktok((t) => ({ ...t, accounts: { ...seeded, ...t.accounts } }))
+  }, [tiktokInfos, tiktok.accounts])
 
   // A privacy choice an account doesn't offer, "Only me" once branded
   // content is on, or a private direct video on a Business connection is

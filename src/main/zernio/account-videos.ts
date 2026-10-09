@@ -1,10 +1,10 @@
 import { shell } from 'electron'
 import { logger } from '../logger'
 import { fetchThumbnail, getJson, type FetchLike } from '../source-preview'
-import { getClient } from './service'
+import { getClient, readCachedOverview } from './service'
 import { sanitizeProviderText, ZernioApiError, type ZernioClient } from './client'
 import { isPostUrl } from './posts-payload'
-import { isZernioId, isZernioPlatform, type ZernioAccountVideo, type ZernioAccountVideosPage } from '../../shared/zernio'
+import { isZernioId, isZernioPlatform, type ZernioAccount, type ZernioAccountVideo, type ZernioAccountVideosPage } from '../../shared/zernio'
 
 type JsonRecord = Record<string, unknown>
 
@@ -12,7 +12,7 @@ const PAGE_SIZE = 24
 const MAX_PAGE = 200
 /** Posts made through Zernio are few; one page of them goes with the first page of the platform's. */
 const ZERNIO_POSTS_LIMIT = 100
-/** Where the platforms serve post thumbnails; anything else shows a placeholder. */
+/** Where post thumbnails and profile pictures are served; anything else shows a placeholder. */
 const THUMBNAIL_HOSTS = [
   /^i\d?\.ytimg\.com$/,
   /\.tiktokcdn(-us|-eu)?\.com$/,
@@ -20,10 +20,21 @@ const THUMBNAIL_HOSTS = [
   /\.cdninstagram\.com$/,
   /\.fbcdn\.net$/,
   /^pbs\.twimg\.com$/,
-  /^media\.licdn\.com$/
+  /^media\.licdn\.com$/,
+  // Profile pictures; Zernio keeps its own copy of each.
+  /^media\.zernio\.com$/,
+  /^yt\d?\.(ggpht|googleusercontent)\.com$/,
+  /^lh\d\.googleusercontent\.com$/
 ]
 const MAX_THUMBNAILS = 300
 const thumbnails = new Map<string, string | null>()
+/**
+ * Account -> the posts its last cover-repair sync returned. Zernio skips a sync
+ * done in the last ~15 s and may then return no posts, so listings close
+ * together share one.
+ */
+const repairSyncs = new Map<string, { at: number; posts: Promise<JsonRecord[]> }>()
+const REPAIR_SYNC_REUSE_MS = 60_000
 /** Post link -> cover image link from the platform's own oEmbed, when Zernio has none. */
 const covers = new Map<string, string | null>()
 
@@ -166,9 +177,25 @@ function hostOf(value: string | null): string | null {
 }
 
 /** Zernio's thumbnail, else the platform's own cover. */
-async function cardImage(fetchImpl: FetchLike, video: ZernioAccountVideo & { thumbnailUrl: string | null }, miss: CoverMiss): Promise<string | null> {
+/**
+ * Zernio's thumbnail; then the fresh one a sync returns (TikTok's cover links
+ * are signed and expire, so a saved one can stop working); then the
+ * platform's own cover.
+ */
+async function cardImage(
+  fetchImpl: FetchLike,
+  video: ZernioAccountVideo & { thumbnailUrl: string | null },
+  miss: CoverMiss,
+  freshLinks: () => Promise<Map<string, string | null>>
+): Promise<string | null> {
   const own = await thumbnail(fetchImpl, video.thumbnailUrl)
   if (own) return own
+  // Only a saved link that stopped working is worth a sync; a post without one has nothing to refresh.
+  const freshLink = video.thumbnailUrl ? (await freshLinks()).get(video.id) ?? null : null
+  if (freshLink && freshLink !== video.thumbnailUrl) {
+    const fresh = await thumbnail(fetchImpl, freshLink)
+    if (fresh) return fresh
+  }
   const cover = await platformCover(fetchImpl, video.platform, video.url, miss)
   if (!cover) return null
   return await thumbnail(fetchImpl, cover) ?? (miss.coverImageFailed = (miss.coverImageFailed ?? 0) + 1, null)
@@ -213,7 +240,11 @@ export async function listAccountVideos(
   const accountPlatform = typeof platform === 'string' && isZernioPlatform(platform) ? platform : null
   for (const item of [...external.posts, ...synced]) {
     const video = fromExternal(item, accountPlatform)
-    if (video && isZernioPlatform(video.platform) && !byId.has(video.id)) byId.set(video.id, video)
+    if (!video || !isZernioPlatform(video.platform)) continue
+    const known = byId.get(video.id)
+    // A post the sync just read carries the newest cover link.
+    if (!known) byId.set(video.id, video)
+    else if (video.thumbnailUrl) known.thumbnailUrl = video.thumbnailUrl
   }
   for (const item of viaZernio.posts) {
     const video = fromZernio(item, accountId)
@@ -227,10 +258,33 @@ export async function listAccountVideos(
   const items = [...byId.values()].sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? ''))
   const videos: ZernioAccountVideo[] = []
   const miss: CoverMiss = {}
+  // Fresh cover links from a sync, asked for at most once, and only when a saved link fails.
+  let freshRequest: Promise<Map<string, string | null>> | null = null
+  const freshLinks = (): Promise<Map<string, string | null>> => {
+    freshRequest ??= (async () => {
+      const links = new Map<string, string | null>()
+      let posts = synced
+      if (posts.length === 0 && refresh !== true) {
+        miss.resynced = 1
+        let shared = repairSyncs.get(accountId)
+        if (!shared || Date.now() - shared.at > REPAIR_SYNC_REUSE_MS) {
+          shared = { at: Date.now(), posts: client.syncExternalPosts(accountId).catch(() => [] as JsonRecord[]) }
+          repairSyncs.set(accountId, shared)
+        }
+        posts = await shared.posts
+      }
+      for (const item of posts) {
+        const video = fromExternal(item, accountPlatform)
+        if (video) links.set(video.id, video.thumbnailUrl)
+      }
+      return links
+    })()
+    return freshRequest
+  }
   // Four thumbnails at a time.
   for (let i = 0; i < items.length; i += 4) {
     const batch = items.slice(i, i + 4)
-    const images = await Promise.all(batch.map((item) => cardImage(fetchImpl, item, miss)))
+    const images = await Promise.all(batch.map((item) => cardImage(fetchImpl, item, miss, freshLinks)))
     batch.forEach((item, j) => {
       // The CDN link stays in the main process; the window gets the image itself.
       const video: ZernioAccountVideo & { thumbnailUrl?: string | null } = { ...item, thumbnail: images[j] }
@@ -253,6 +307,16 @@ export async function listAccountVideos(
     })
   }
   return { videos, nextPage: external.pages !== null && pageNumber < external.pages && pageNumber < MAX_PAGE ? pageNumber + 1 : null }
+}
+
+/**
+ * A connected account's profile picture as a data: URL, or null. The link is
+ * read from the saved accounts, never taken from the window.
+ */
+export async function accountPicture(accountId: unknown, deps: { fetchImpl?: FetchLike; findAccount?: (id: string) => ZernioAccount | undefined } = {}): Promise<string | null> {
+  if (!isZernioId(accountId)) return null
+  const account = (deps.findAccount ?? ((id: string) => readCachedOverview()?.accounts.find((a) => a.id === id)))(accountId)
+  return thumbnail(deps.fetchImpl ?? fetch, account?.pictureUrl ?? null)
 }
 
 /** Opens a post on its platform's own site; nothing else is opened. */
