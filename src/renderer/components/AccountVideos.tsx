@@ -157,7 +157,7 @@ function VideoCard({ video, onOpen }: { video: ZernioAccountVideo; onOpen: () =>
             </div>
           )}
           <div className="absolute inset-x-1.5 top-1.5 flex justify-between gap-1">
-            {video.viaZernio ? <span className="rounded-full bg-black/60 px-1.5 text-2xs font-medium leading-4 text-white backdrop-blur" title="Posted through Zernio">SparkClip</span> : <span />}
+            {video.viaZernio ? <span className="rounded-full bg-accent px-1.5 text-2xs font-semibold leading-4 text-accent-ink shadow-[0_2px_8px_-2px_rgb(0_0_0/0.6)] ring-1 ring-white/30" title="Posted through Zernio" data-badge="sparkclip">SparkClip</span> : <span />}
             {video.mediaType && video.mediaType !== 'video' && (
               <span className="rounded-full bg-black/60 px-1.5 text-2xs leading-4 text-white backdrop-blur">{video.mediaType === 'image' ? 'Photo' : 'Carousel'}</span>
             )}
